@@ -1,206 +1,384 @@
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import random
+import string
 
-# --- الإعدادات ---
+# --- Configuration ---
 TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
-ADMIN_ID = 5145154527  # الـ ID الخاص بك كأدمن أساسي
+PRIMARY_ADMIN = 5145154527  # Your Telegram User ID
+SUPPORT_USER = "@i6issiiiii"
 
-# قائمة المستخدمين المصرح لهم (تبدأ بالأدمن تلقائياً)
-authorized_users = {ADMIN_ID}
+# --- Database & Config ---
+ADMIN_LIST = {PRIMARY_ADMIN}
 
-# قاعدة بيانات الحسابات المسموح لها بالدخول (الـ Login والـ Password)
-valid_credentials = {
-    "admin123": "pass123"  # حساب افتراضي للتجربة
+# Base prices are stored strictly in USD inside the engine
+PRODUCTS = {
+    "Fluorite Hack 💎": {"1": 5.0, "7": 15.0, "30": 40.0},
+    "Free Fire VIP 🔥": {"1": 3.0, "7": 10.0, "30": 25.0}
 }
 
-# قاموس لتخزين لغة كل مستخدم
-user_languages = {}
+user_balances = {}  # Store balances in USD {user_id: float}
+user_currencies = {}  # Selected currency mode {user_id: 'USD' or 'LOCAL'}
+user_countries = {}  # Simulated country detected via initial check
 
-# قاموس لحفظ حالة الأدمن المؤقتة (إضافة، حذف، أو تفعيل وضع المستخدم)
-admin_states = {}
-admin_view_mode = {} # يحفظ هل الأدمن في وضع (الأدمن 👑) أم وضع (المستخدم 👥)
+# Fixed internal Exchange Rates (Base 1 USD to Local)
+EXCHANGE_RATES = {
+    "SA": {"symbol": "SAR", "rate": 3.75},   # Saudi Arabia
+    "EG": {"symbol": "EGP", "rate": 47.0},   # Egypt
+    "AE": {"symbol": "AED", "rate": 3.67},   # UAE
+    "DZ": {"symbol": "DZD", "rate": 134.0},  # Algeria
+    "IQ": {"symbol": "IQD", "rate": 1310.0}, # Iraq
+    "DEFAULT": {"symbol": "EUR", "rate": 0.92} # Default fallback for other zones
+}
 
-# --- النصوص بمختلف اللغات ---
-MESSAGES = {
-    'ar': {
-        'user_welcome': "مرحباً بك مجدداً! البوت مفتوح وجاهز للاستخدام. 🚀✨",
-        'unauthorized': "👋 Welcome! Your Telegram ID is: `{user_id}`\n\n🔒 Enter the credentials provided by the administrator in the following format:\n\n`LOGIN`\n`PASSWORD`\n\n━━━━━━━━━━━━━━━━━━━━\n👑 ✨ *رجاء اتصل بـ @i6issiiiii للحصول على تصريح الدخول الخاص بك* 💎💌",
-        'success': "🎉🎊 تـم تـفـعـيـل الـبـوت بـنـجـاح! 🎊🎉\n\n🔓 تم منحك تصريح الدخول بنجاح، يمكنك الآن استخدام كافة الميزات المتاحة. ✨🚀",
-        'fail': "❌ عذراً، الحساب الذي أدخلته غير صحيح أو انتهت صلاحيته!\n\n🔐 رجاء اتصل بـ @i6issiiiii للحصول على تصريح 👑💎",
-        'active': "🔄 تم استقبال رسالتك بنجاح! (البوت قيد الخدمة...) ⚡"
+active_coupons = {"CHARGE-10USD": 10.0, "CHARGE-50USD": 50.0}
+
+fluorite_stock = {
+    "Fluorite Hack 💎": {
+        "1": ["FLUORITE-1DAY-XXXX"], "7": ["FLUORITE-7DAY-ZZZZ"], "30": ["FLUORITE-30DAY-AAAA"]
     },
-    'en': {
-        'user_welcome': "Welcome back! The bot is unlocked and ready for use. 🚀✨",
-        'unauthorized': "👋 Welcome! Your Telegram ID is: `{user_id}`\n\n🔒 Enter the credentials provided by the administrator in the following format:\n\n`LOGIN`\n`PASSWORD`\n\n━━━━━━━━━━━━━━━━━━━━\n👑 ✨ *Please contact @i6issiiiii to get your authorization credentials* 💎💌",
-        'success': "🎉🎊 Bot activated successfully! 🎊🎉\n\n🔓 Access granted, you can now use all the features. ✨🚀",
-        'fail': "❌ Sorry, the credentials you entered are incorrect!\n\n🔐 Please contact @i6issiiiii to get authorization 👑💎",
-        'active': "🔄 Message received successfully! (Bot is in service...) ⚡"
-    },
-    'hi': {
-        'user_welcome': "आपका स्वागत है! बोट उपयोग के लिए तैयार है। 🚀✨",
-        'unauthorized': "👋 Welcome! Your Telegram ID is: `{user_id}`\n\n🔒 Enter the credentials provided by the administrator in the following format:\n\n`LOGIN`\n`PASSWORD`\n\n━━━━━━━━━━━━━━━━━━━━\n👑 ✨ *अनुमति प्राप्त करने के लिए कृपया @i6issiiiii से संपर्क करें* 💎💌",
-        'success': "🎉🎊 बोट सफलतापूर्वक सक्रिय हो गया! 🎊🎉",
-        'fail': "❌ क्षमा करें, आपके द्वारा दर्ज किया गया क्रेडेंशियल गलत है! 🔐 संपर्क करें @i6issiiiii 👑💎",
-        'active': "🔄 संदेश प्राप्त हुआ! ⚡"
-    },
-    'vi': {
-        'user_welcome': "Chào mừng trở lại! Bot đã sẵn sàng sử dụng. 🚀✨",
-        'unauthorized': "👋 Welcome! Your Telegram ID is: `{user_id}`\n\n🔒 Enter the credentials provided by the administrator in the following format:\n\n`LOGIN`\n`PASSWORD`\n\n━━━━━━━━━━━━━━━━━━━━\n👑 ✨ *Vui lòng liên hệ @i6issiiiii để được cấp phép* 💎💌",
-        'success': "🎉🎊 Bot đã được kích hoạt thành công! 🎊🎉",
-        'fail': "❌ Sai thông tin đăng nhập! 🔐 Vui lòng liên hệ @i6issiiiii 👑💎",
-        'active': "🔄 Đã nhận tin nhắn! ⚡"
+    "Free Fire VIP 🔥": {
+        "1": ["FF-1DAY-1111"], "7": ["FF-7DAY-2222"], "30": ["FF-30DAY-3333"]
     }
 }
 
-# --- وظيفة استدعاء كيبورد الأدمن الرئيسية ---
+# States
+admin_states = {}
+user_states = {}
+admin_view_mode = {}
+
+# --- Helper Currency Functions ---
+def get_user_currency_info(user_id):
+    """Returns the currency symbol and rate factor for the user"""
+    country = user_countries.get(user_id, "DEFAULT")
+    mode = user_currencies.get(user_id, "USD")
+    
+    if mode == "USD":
+        return "$", 1.0
+    else:
+        info = EXCHANGE_RATES.get(country, EXCHANGE_RATES["DEFAULT"])
+        return info["symbol"], info["rate"]
+
+def format_price(usd_amount, symbol, rate):
+    """Converts and formats the currency cleanly"""
+    local_amount = usd_amount * rate
+    if symbol == "$":
+        return f"{local_amount:.2f}$"
+    return f"{local_amount:.2f} {symbol}"
+
+# --- Keyboards ---
 def get_admin_keyboard():
     keyboard = [
-        [KeyboardButton("➕ إضافة حساب جديد"), KeyboardButton("❌ مسح وحظر حساب")],
-        [KeyboardButton("📋 عرض الحسابات النشطة")],
-        [KeyboardButton("👥 تفعيل وضع المستخدم")]
+        [KeyboardButton("🎫 Generate New Coupon"), KeyboardButton("📦 Restock Cheat Keys")],
+        [KeyboardButton("⚙️ Change Product Prices"), KeyboardButton("🛠️ Delete Mistaken Key")],
+        [KeyboardButton("👥 Add New Admin ID"), KeyboardButton("📋 View System Analytics")],
+        [KeyboardButton("👤 Switch to User Mode")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# --- وظيفة استدعاء كيبورد اللغات للمستخدمين ---
-def get_languages_keyboard():
+def get_user_keyboard(user_id):
+    _, _ = get_user_currency_info(user_id)
     keyboard = [
-        [KeyboardButton("العربية 🇸🇦"), KeyboardButton("English 🇬🇧")],
-        [KeyboardButton("हिन्दी 🇮🇳"), KeyboardButton("Tiếng Việt 🇻🇳")]
+        [KeyboardButton("🛒 Browse Premium Cheats"), KeyboardButton("💳 Redeem Coupon")],
+        [KeyboardButton("💰 My Wallet"), KeyboardButton("💱 Switch Currency")],
+    ]
+    if user_id in ADMIN_LIST:
+        keyboard.append([KeyboardButton("🔙 Back to Admin Panel")])
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+def get_currency_preference_keyboard():
+    keyboard = [
+        [KeyboardButton("🟢 Local Country Currency"), KeyboardButton("💵 Standard USD ($)")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+# --- Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    
-    # تفريغ أي حالات معلقة عند إعادة تشغيل البوت
     admin_states[user_id] = None
+    user_states[user_id] = None
     
-    # التحقق إذا كان السائل هو الأدمن وليس في وضع المستخدم
-    if user_id == ADMIN_ID and admin_view_mode.get(user_id, 'admin') == 'admin':
+    if user_id not in user_balances:
+        user_balances[user_id] = 0.0
+
+    # Auto-assign a random simulated Middle-East/North-African regional country code for localization demo
+    if user_id not in user_countries:
+        user_countries[user_id] = random.choice(["SA", "EG", "AE", "DZ", "IQ"])
+
+    # --- Admin Dashboard Entry ---
+    if user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
         await update.message.reply_text(
-            f"👑 **مرحباً بك يا أدمن في لوحة التحكم العادية!**\n"
-            f"الـ ID الخاص بك: `{user_id}`\n\n"
-            f"الآن الأوامر تظهر في الكيبورد بالأسفل لسهولة إدارتها 👇",
-            reply_markup=get_admin_keyboard(),
-            parse_mode="Markdown"
+            f"👑 **Welcome Back Commander! [Fluorite Master Dashboard]**\n\n"
+            f"Manage licenses, edit prices, authorize co-admins, and monitor your shop live below 👇",
+            reply_markup=get_admin_keyboard()
         )
         return
 
-    # واجهة المستخدم العادي (أو الأدمن المحوّل لوضع المستخدم)
-    await update.message.reply_text(
-        "🌐 Please choose your language / الرجاء اختيار لغتك :", 
-        reply_markup=get_languages_keyboard()
+    # --- Prompt Currency Preference Selection on first login ---
+    if user_id not in user_currencies:
+        country_code = user_countries[user_id]
+        local_sym = EXCHANGE_RATES.get(country_code, EXCHANGE_RATES["DEFAULT"])["symbol"]
+        
+        setup_msg = (
+            f"🌍 **Currency Detection System**\n\n"
+            f"We detected your region access profile. Would you prefer to browse our storefront products "
+            f"and checkout using your **Local Currency ({local_sym})** or **Standard USD ($)**?"
+        )
+        await update.message.reply_text(setup_msg, reply_markup=get_currency_preference_keyboard())
+        return
+
+    await show_user_welcome(update, user_id)
+
+async def show_user_welcome(update: Update, user_id: int):
+    sym, rate = get_user_currency_info(user_id)
+    bal_str = format_price(user_balances.get(user_id, 0.0), sym, rate)
+    
+    welcome_msg = (
+        f"👋 **Welcome to the Elite Fluorite Keys Store!** ✨\n\n"
+        f"🔒 **Access Status:** `Verified Customer`\n"
+        f"💳 **Current Wallet Balance:** `{bal_str}`\n\n"
+        f"To unlock our premium lethal cheats and secure your exclusive keys, please add balance to your wallet via a **Recharge Coupon Code**.\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👑 **Official Live Sales & Support:** {SUPPORT_USER} 📲\n"
+        f"💬 Contact the developer right now to clear your payment and secure your high-value voucher code! 💸💎\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚡ _Navigate your way to premium power using the buttons below!_"
     )
+    await update.message.reply_text(welcome_msg, parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
 
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
-    lang = user_languages.get(user_id, 'ar')
 
-    # --- منطق الأدمن (لوحة التحكم بالكيبورد) ---
-    if user_id == ADMIN_ID:
-        
-        # إذا أراد الأدمن الخروج من وضع المستخدم والعودة للأدمن
-        if text == "🔙 العودة للوحة الأدمن":
-            admin_view_mode[user_id] = 'admin'
-            admin_states[user_id] = None
-            await update.message.reply_text("👑 تم العودة إلى لوحة تحكم الأدمن بنجاح.", reply_markup=get_admin_keyboard())
+    # --- [Handle Currency Choice Setup] ---
+    if text in ["🟢 Local Country Currency", "💵 Standard USD ($)"]:
+        user_currencies[user_id] = "LOCAL" if text == "🟢 Local Country Currency" else "USD"
+        await update.message.reply_text("✅ Currency preference locked and successfully configured!", reply_markup=ReplyKeyboardRemove())
+        await show_user_welcome(update, user_id)
+        return
+
+    # --- [Admin Control Protocol] ---
+    if user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
+        if text == "🎫 Generate New Coupon":
+            admin_states[user_id] = 'awaiting_coupon_val'
+            await update.message.reply_text("💵 Enter voucher cash value in USD (Numbers only, e.g., 20):", reply_markup=ReplyKeyboardRemove())
             return
             
-        # التحقق من أن الأدمن في وضعه الأساسي وليس في محاكاة المستخدم
-        if admin_view_mode.get(user_id, 'admin') == 'admin':
+        elif text == "📦 Restock Cheat Keys":
+            admin_states[user_id] = 'awaiting_key_add'
+            msg = "⚙️ **Send the keys using this exact layout structure:**\n\n" \
+                  "`Product Name | Days | License Key`\n\n" \
+                  "💡 _Example:_\n`Fluorite Hack 💎 | 1 | FLUORITE-KEY-ABC123XYZ`"
+            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+            return
+
+        elif text == "⚙️ Change Product Prices":
+            admin_states[user_id] = 'awaiting_price_change'
+            msg = "⚡ **To update a product price, send it using this format (Always enter value in USD):**\n\n" \
+                  "`Product Name | Days | New Price In USD`\n\n" \
+                  "📝 _Example:_\n`Fluorite Hack 💎 | 1 | 6.5`"
+            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+            return
+
+        elif text == "🛠️ Delete Mistaken Key":
+            admin_states[user_id] = 'awaiting_key_delete'
+            await update.message.reply_text("🗑️ **To remove a specific key from stock, paste the exact key code below:**", reply_markup=ReplyKeyboardRemove())
+            return
+
+        elif text == "👥 Add New Admin ID":
+            admin_states[user_id] = 'awaiting_admin_id'
+            await update.message.reply_text("🆔 **Send the Telegram User ID of the person you want to promote to Admin:**", reply_markup=ReplyKeyboardRemove())
+            return
             
-            if text == "➕ إضافة حساب جديد":
-                admin_states[user_id] = 'awaiting_add'
-                await update.message.reply_text("➕ من فضلك أرسل الـ LOGIN والـ PASSWORD الجديدين مفصولين بمسافة واحدة فقط.\n\nمثال:\n`user55 pass99`", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
-                return
-                
-            elif text == "❌ مسح وحظر حساب":
-                admin_states[user_id] = 'awaiting_delete'
-                await update.message.reply_text("❌ من فضلك أرسل الـ LOGIN الذي تريد حذفه وحظره من البوت تماماً:", reply_markup=ReplyKeyboardRemove())
-                return
-                
-            elif text == "📋 عرض الحسابات النشطة":
-                if not valid_credentials:
-                    msg = "📋 لا توجد أي حسابات نشطة حالياً في قاعدة البيانات."
-                else:
-                    msg = "📋 **الحسابات النشطة المتوفرة حالياً:**\n\n"
-                    for log, pas in valid_credentials.items():
-                        msg += f"👤 LOGIN: `{log}`  |  🔑 PASSWORD: `{pas}`\n"
-                await update.message.reply_text(msg, reply_markup=get_admin_keyboard(), parse_mode="Markdown")
-                return
-                
-            elif text == "👥 تفعيل وضع المستخدم":
-                admin_view_mode[user_id] = 'user' # تحويل الوضع لمستخدم للتجربة
-                # كيبورد مخصص للأدمن في وضع المستخدم للعودة
-                back_keyboard = ReplyKeyboardMarkup([[KeyboardButton("🔙 العودة للوحة الأدمن")]], resize_keyboard=True)
-                await update.message.reply_text("🔄 تم تفعيل وضع المستخدم. أرسل الآن أمر /start لتجربة البوت كأنك مستخدم جديد تماماً.", reply_markup=back_keyboard)
-                return
+        elif text == "📋 View System Analytics":
+            msg = "🎫 **Active Coupons:**\n"
+            for coup, val in active_coupons.items():
+                msg += f"🔹 Code: `{coup}` | `{val}$` \n"
+            msg += "\n💰 **Product Price List (Engine USD):**\n"
+            for prod, prices in PRODUCTS.items():
+                msg += f"💎 `{prod}` -> 1D: `{prices['1']}$` | 7D: `{prices['7']}$` | 30D: `{prices['30']}$` \n"
+            msg += "\n📦 **Current Live Stock Statistics:**\n"
+            for prod, days in fluorite_stock.items():
+                msg += f"◽ {prod}:\n"
+                for day, keys in days.items():
+                    msg += f"   - {day} Day: ({len(keys)}) keys available.\n"
+            msg += f"\n👑 **Authorized Admins Count:** `{len(ADMIN_LIST)}`"
+            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_admin_keyboard())
+            return
+            
+        elif text == "👤 Switch to User Mode":
+            admin_view_mode[user_id] = 'user'
+            if user_id not in user_currencies: user_currencies[user_id] = "USD"
+            await update.message.reply_text("🔄 Client simulation activated! Enjoy your shop testing experience.", reply_markup=get_user_keyboard(user_id))
+            return
 
-            # معالجة النصوص المرسلة بناءً على حالة زر الأدمن المضغوط
-            state = admin_states.get(user_id)
-            if state == 'awaiting_add':
-                parts = text.split()
-                if len(parts) >= 2:
-                    new_login = parts[0]
-                    new_password = parts[1]
-                    valid_credentials[new_login] = new_password
+        # Executing Admin States
+        state = admin_states.get(user_id)
+        if state == 'awaiting_coupon_val':
+            try:
+                val = float(text)
+                coupon_code = "FLUORITE-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+                active_coupons[coupon_code] = val
+                admin_states[user_id] = None
+                await update.message.reply_text(f"✅ **Coupon Minted!**\n💵 Value: `{val}$`\n🎫 Code: `{coupon_code}`", parse_mode="Markdown", reply_markup=get_admin_keyboard())
+            except ValueError:
+                await update.message.reply_text("❌ Invalid number. Try again:")
+            return
+            
+        elif state == 'awaiting_key_add':
+            parts = text.split('|')
+            if len(parts) == 3:
+                p_name, p_days, p_key = parts[0].strip(), parts[1].strip(), parts[2].strip()
+                if p_name in fluorite_stock and p_days in ["1", "7", "30"]:
+                    fluorite_stock[p_name][p_days].append(p_key)
                     admin_states[user_id] = None
-                    await update.message.reply_text(f"✅ تم حفظ الحساب بنجاح!\n👤 LOGIN: `{new_login}`\n🔑 PASSWORD: `{new_password}`", parse_mode="Markdown", reply_markup=get_admin_keyboard())
+                    await update.message.reply_text(f"✅ Key added to stock successfully!", reply_markup=get_admin_keyboard())
                 else:
-                    await update.message.reply_text("⚠️ خطأ في الصيغة! يرجى إرسال الـ LOGIN والـ PASSWORD وبينهما مسافة فقط:")
-                return
-                
-            elif state == 'awaiting_delete':
-                if text in valid_credentials:
-                    del valid_credentials[text]
-                    admin_states[user_id] = None
-                    await update.message.reply_text(f"🗑️ تم مسح وحظر الـ LOGIN: `{text}` بنجاح!", parse_mode="Markdown", reply_markup=get_admin_keyboard())
-                else:
-                    await update.message.reply_text("❌ هذا الـ LOGIN غير موجود. أرسل الاسم الصحيح:")
-                return
+                    await update.message.reply_text("❌ Product or day tier mismatch. Try again:")
+            else:
+                await update.message.reply_text("⚠️ Layout error. Use: `Product Name | Days | License Key`")
+            return
 
-    # --- منطق معالجة لغات الكيبورد للمستخدمين العاديين (أو الأدمن في وضع المستخدم) ---
-    if text in ["العربية 🇸🇦", "English 🇬🇧", "हिन्दी 🇮🇳", "Tiếng Việt 🇻🇳"]:
-        if text == "العربية 🇸🇦": lang = 'ar'
-        elif text == "English 🇬🇧": lang = 'en'
-        elif text == "हिन्दी 🇮🇳": lang = 'hi'
-        elif text == "Tiếng Việt 🇻🇳": lang = 'vi'
-        
-        user_languages[user_id] = lang
-        
-        # الاحتفاظ بزر العودة للأدمن لو كان الأدمن يجرب الوضع
-        current_markup = ReplyKeyboardMarkup([[KeyboardButton("🔙 العودة للوحة الأدمن")]], resize_keyboard=True) if user_id == ADMIN_ID else ReplyKeyboardRemove()
-        
-        if user_id in authorized_users and admin_view_mode.get(user_id, 'admin') != 'user':
-            await update.message.reply_text(MESSAGES[lang]['user_welcome'], reply_markup=current_markup)
-        else:
-            await update.message.reply_text(MESSAGES[lang]['unauthorized'].format(user_id=user_id), parse_mode="Markdown", reply_markup=current_markup)
+        elif state == 'awaiting_price_change':
+            parts = text.split('|')
+            if len(parts) == 3:
+                p_name, p_days, p_price = parts[0].strip(), parts[1].strip(), parts[2].strip()
+                if p_name in PRODUCTS and p_days in ["1", "7", "30"]:
+                    try:
+                        PRODUCTS[p_name][p_days] = float(p_price)
+                        admin_states[user_id] = None
+                        await update.message.reply_text(f"✅ **Price Updated!**\n💎 `{p_name}` [{p_days} Day] set to `{p_price}$`", parse_mode="Markdown", reply_markup=get_admin_keyboard())
+                    except ValueError:
+                        await update.message.reply_text("❌ Price must be a valid number:")
+                else:
+                    await update.message.reply_text("❌ Product name or day tier not found in system.")
+            else:
+                await update.message.reply_text("⚠️ Use layout: `Product Name | Days | New Price`")
+            return
+
+        elif state == 'awaiting_key_delete':
+            found = False
+            for prod, days in fluorite_stock.items():
+                for day, keys in days.items():
+                    if text in keys:
+                        keys.remove(text)
+                        found = True
+            admin_states[user_id] = None
+            if found:
+                await update.message.reply_text("🗑️ **Successfully deleted the mistaken key from stock!**", reply_markup=get_admin_keyboard())
+            else:
+                await update.message.reply_text("❌ Key was not found anywhere in active stock.", reply_markup=get_admin_keyboard())
+            return
+
+        elif state == 'awaiting_admin_id':
+            try:
+                new_admin = int(text)
+                ADMIN_LIST.add(new_admin)
+                admin_states[user_id] = None
+                await update.message.reply_text(f"👑 **Promotion Success!** User ID `{new_admin}` is now an official Admin.", parse_mode="Markdown", reply_markup=get_admin_keyboard())
+            except ValueError:
+                await update.message.reply_text("❌ Telegram ID must be digits only. Enter a valid ID:")
+            return
+
+    # --- [Admin Escape Route] ---
+    if user_id in ADMIN_LIST and text == "🔙 Back to Admin Panel":
+        admin_view_mode[user_id] = 'admin'
+        admin_states[user_id] = None
+        user_states[user_id] = None
+        await update.message.reply_text("👑 Controls restored. Back to HQ Operations.", reply_markup=get_admin_keyboard())
         return
 
-    # --- إذا كان مستخدم عادي ومصرح له سابقاً ومثبت حسابه ---
-    if user_id in authorized_users and admin_view_mode.get(user_id, 'admin') != 'user':
-        await update.message.reply_text(MESSAGES[lang]['active'])
+    # --- [User Store Operations] ---
+    sym, rate = get_user_currency_info(user_id)
+
+    if text == "💱 Switch Currency":
+        current_mode = user_currencies.get(user_id, "USD")
+        user_currencies[user_id] = "USD" if current_mode == "LOCAL" else "LOCAL"
+        new_sym, _ = get_user_currency_info(user_id)
+        await update.message.reply_text(f"🔄 Currency successfully converted and switched to: **{new_sym}**", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
         return
 
-    # --- فحص محاولة تسجيل دخول المستخدم العادي (إدخال سطرين) ---
-    lines = text.split('\n')
-    if len(lines) == 2:
-        input_login = lines[0].strip()
-        input_password = lines[1].strip()
-        
-        if input_login in valid_credentials and valid_credentials[input_login] == input_password:
-            # إذا كان أدمن يجرب، لا يضيف نفسه مجدداً، فقط يظهر نجاح العملية
-            if user_id != ADMIN_ID:
-                authorized_users.add(user_id)
-                del valid_credentials[input_login] # يمسح لمرة واحدة فقط لمنع التداول
+    elif text == "🛒 Browse Premium Cheats":
+        msg = "🔥 **Exclusive Fluorite Mod Menu Portfolio:** 🔥\n\n"
+        for prod, prices in PRODUCTS.items():
+            p1 = format_price(prices['1'], sym, rate)
+            p7 = format_price(prices['7'], sym, rate)
+            p30 = format_price(prices['30'], sym, rate)
             
-            await update.message.reply_text(MESSAGES[lang]['success'], reply_markup=ReplyKeyboardRemove())
+            msg += f"💎 **Software:** `{prod}`\n"
+            msg += f"   ▫️ 1 Day Pass: `{p1}` \n"
+            msg += f"   ▫️ 7 Day Pass: `{p7}` \n"
+            msg += f"   ▫️ 30 Day Pass: `{p30}` \n"
+            msg += f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += "🎯 **Instant Purchase Command:**\nDuplicate and send the exact template structure format below in one line:\n\n" \
+               "`Buy | Product Name | Days`\n\n" \
+               "📝 _Example:_ \n`Buy | Fluorite Hack 💎 | 1`"
+        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
+        return
+        
+    elif text == "💳 Redeem Coupon":
+        user_states[user_id] = 'entering_coupon'
+        await update.message.reply_text("🎫 **Drop your active balance voucher code below to credit your account immediately:**", reply_markup=ReplyKeyboardRemove())
+        return
+        
+    elif text == "💰 My Wallet":
+        bal_str = format_price(user_balances.get(user_id, 0.0), sym, rate)
+        await update.message.reply_text(f"👤 **Your Private Store Account Metrics:**\n\n💵 Spendable Funds: `{bal_str}` \n🎯 Currency View Profile: `{sym}` \n🎯 Account Manager: {SUPPORT_USER}", parse_mode="Markdown")
+        return
+
+    # Handling Coupon Redeeming
+    if user_states.get(user_id) == 'entering_coupon':
+        if text in active_coupons:
+            amount_usd = active_coupons[text]
+            user_balances[user_id] += amount_usd
+            del active_coupons[text]  # Burn code
+            user_states[user_id] = None
+            
+            credited_str = format_price(amount_usd, sym, rate)
+            await update.message.reply_text(f"🎉 **Boom! Coupon Loaded Successfully.**\n💰 `{credited_str}` has been added to your live store wallet balance!", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
         else:
-            await update.message.reply_text(MESSAGES[lang]['fail'])
+            user_states[user_id] = None
+            await update.message.reply_text("❌ **Invalid or expired voucher code!** Contact support if this is a mistake.", reply_markup=get_user_keyboard(user_id))
+        return
+
+    # Handling Automated Purchases
+    if text.lower().startswith("buy"):
+        parts = text.split('|')
+        if len(parts) == 3:
+            p_name, p_days = parts[1].strip(), parts[2].strip()
+            
+            if p_name in PRODUCTS and p_days in ["1", "7", "30"]:
+                price_usd = PRODUCTS[p_name][p_days]
+                current_bal_usd = user_balances.get(user_id, 0.0)
+                
+                if current_bal_usd >= price_usd:
+                    if fluorite_stock[p_name][p_days]:
+                        purchased_key = fluorite_stock[p_name][p_days].pop(0)
+                        user_balances[user_id] -= price_usd
+                        
+                        success_msg = (
+                            f"🎉 **Transaction Complete! Purchase Successful!** 🎉\n\n"
+                            f"📦 **Here is your Fluorite Key License:**\n"
+                            f"`{purchased_key}`\n\n"
+                            f"🎮 _Inject your license, launch the game, and dominate the battleground!_"
+                        )
+                        await update.message.reply_text(success_msg, parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
+                    else:
+                        await update.message.reply_text(f"⚠️ **This tier is out of stock!** Contact {SUPPORT_USER} for an instant restock request.", reply_markup=get_user_keyboard(user_id))
+                else:
+                    needed_str = format_price(price_usd, sym, rate)
+                    await update.message.reply_text(f"❌ **Funds Insufficient!** This item requires `{needed_str}`. Contact support {SUPPORT_USER} to add credits! ✨", reply_markup=get_user_keyboard(user_id))
+            else:
+                await update.message.reply_text("❌ Invalid product name or day configuration parameter.")
+        else:
+            await update.message.reply_text("⚠️ Faulty purchase structure. Send like this:\n`Buy | Product Name | Days`")
+        return
+
+    # Fallback response for unconfigured/unverified profiles
+    if user_id not in user_currencies:
+        await update.message.reply_text("⚙️ Please select your interface currency view using the buttons below:", reply_markup=get_currency_preference_keyboard())
     else:
-        # إذا لم يدخل سطرين ولم يكن مصرحاً، تذكيره بالخطأ
-        await update.message.reply_text(MESSAGES[lang]['fail'])
+        await update.message.reply_text("ℹ️ Please deploy the provided keyboard buttons below to manage products or checkouts.", reply_markup=get_user_keyboard(user_id))
 
 if __name__ == '__main__':
     application = ApplicationBuilder().token(TOKEN).build()
@@ -208,5 +386,5 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('start', start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
     
-    print("⚡ تم تشغيل البوت بنظام كيبوردات الأزرار الكاملة ومحاكي وضع المستخدم المتقدم...")
+    print("🏪 Dynamic Multi-Currency Fluorite Store Online...")
     application.run_polling()
