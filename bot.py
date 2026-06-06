@@ -3,41 +3,42 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 # --- الإعدادات ---
 TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
-ADMIN_ID = 123456789  # استبدل هذا الرقم بالـ ID الخاص بك (يمكنك معرفته من البوت نفسه)
+ADMIN_ID = 5145154527  # تم تعيين الـ ID الخاص بك كأدمن
 
-# قاعدة بيانات وهمية للمستخدمين المسجلين
-authorized_users = {ADMIN_ID} 
+# قائمة المستخدمين المصرح لهم (تبدأ بالأدمن فقط)
+authorized_users = {ADMIN_ID}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
-    # 1. إظهار الـ ID للمستخدم
-    await update.message.reply_text(f"مرحباً! الـ ID الخاص بك هو: `{user_id}`", parse_mode='Markdown')
-    
-    # 2. التحقق من حالة التسجيل
     if user_id in authorized_users:
-        await update.message.reply_text("أهلاً بك يا أدمن! أنت مسجل بالفعل.")
+        await update.message.reply_text("مرحباً بك يا أدمن! البوت يعمل بكامل صلاحياته. 🚀")
     else:
-        await update.message.reply_text("يرجى إرسال 'كلمة السر' لتسجيل الدخول.")
+        # الرسالة المطلوبة عند عدم وجود تصريح
+        msg = (
+            "⚠️ من فضلك احصل على login خاصتك لفتح البوت! 🔐\n\n"
+            "للحصول على تصريح الدخول، يرجى التواصل مع الأدمن هنا: @i6issiiiii 📲✨"
+        )
+        await update.message.reply_text(msg)
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+async def handle_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    text = update.message.text
     
-    # كلمة السر المطلوبة للتسجيل
-    PASSWORD = "123" 
+    # كلمة السر للتسجيل (يمكنك تغييرها)
+    SECRET_PASSWORD = "123"
     
-    if text == PASSWORD:
+    if text == SECRET_PASSWORD:
         authorized_users.add(user_id)
-        await update.message.reply_text("تم تسجيل دخولك بنجاح!")
+        await update.message.reply_text("✅ تم تسجيل دخولك بنجاح! أهلاً بك في البوت. 🎉")
     else:
-        await update.message.reply_text("كلمة السر خاطئة. تواصل مع الأدمن للحصول عليها.")
+        await update.message.reply_text("❌ كلمة السر غير صحيحة. يرجى مراجعة الأدمن @i6issiiiii")
 
 if __name__ == '__main__':
     application = ApplicationBuilder().token(TOKEN).build()
     
     application.add_handler(CommandHandler('start', start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_login))
     
-    print("البوت يعمل...")
+    print("البوت يعمل الآن...")
     application.run_polling()
