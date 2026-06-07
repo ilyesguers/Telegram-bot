@@ -35,7 +35,6 @@ def get_user_keyboard_page2(user_id):
         ["🔄 Reset Fluorite"],
         ["🔙 Back"]
     ]
-    # إذا كان المستخدم هو الأدمن، نضيف زر لوحة التحكم تلقائياً
     if user_id == ADMIN_ID:
         buttons.insert(0, ["👑 Admin Panel 👑"])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
@@ -47,8 +46,51 @@ def get_admin_keyboard():
     ], resize_keyboard=True)
 
 # ==========================================
-# 3. الدوال المساعدة لقاعدة البيانات
+# 3. إعداد وتجهيز قاعدة البيانات تلقائياً
 # ==========================================
+def initialize_database():
+    """هذه الدالة تقوم بإنشاء الجداول في قاعدة البيانات تلقائياً إذا لم تكن موجودة"""
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        
+        # إنشاء جدول المستخدمين
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            telegram_id BIGINT PRIMARY KEY,
+            username VARCHAR(255),
+            balance DECIMAL(10,2) DEFAULT 0.0,
+            role VARCHAR(50) DEFAULT 'user'
+        )
+        """)
+        
+        # إنشاء جدول المفاتيح (نستخدم `` حول keys لأنها كلمة محجوزة)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS `keys` (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            code VARCHAR(255) UNIQUE,
+            hwid VARCHAR(255),
+            status VARCHAR(50) DEFAULT 'unused'
+        )
+        """)
+        
+        # إنشاء جدول الكوبونات
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS coupons (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            code VARCHAR(255) UNIQUE,
+            amount DECIMAL(10,2),
+            status VARCHAR(50) DEFAULT 'unused'
+        )
+        """)
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("✅ تم فحص وتجهيز الجداول في قاعدة البيانات بنجاح.")
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء إنشاء الجداول: {e}")
+
 def check_and_create_user(user_id, username):
     try:
         conn = mysql.connector.connect(**db_config)
@@ -63,7 +105,7 @@ def check_and_create_user(user_id, username):
         cursor.close()
         conn.close()
     except Exception as e:
-        print(f"Database init error: {e}")
+        pass
 
 # ==========================================
 # 4. الدوال الأساسية للبوت
@@ -85,7 +127,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     current_state = user_states.get(user_id)
 
-    # --- التنقل العام بين القوائم ---
     if text == "➡️ Next":
         user_states[user_id] = None
         await update.message.reply_text("⚙️ **الخيارات المتقدمة:**", reply_markup=get_user_keyboard_page2(user_id))
@@ -95,11 +136,8 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔙 تم العودة للقائمة الرئيسية:", reply_markup=get_user_keyboard_page1())
         return
 
-    # ==========================================
-    # ميزات الصفحة الأولى (User Page 1)
-    # ==========================================
     if text == "💙 Support 💙":
-        await update.message.reply_text("📬 للدعم الفني والاستفسارات، تواصل مع المطور مباشرة عبر: @YourSupportUsername")
+        await update.message.reply_text("📬 للدعم الفني والاستفسارات، تواصل مع المطور مباشرة.")
         return
 
     elif text == "🚪 Log out 🚪":
@@ -112,29 +150,24 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn = mysql.connector.connect(**db_config)
             cursor = conn.cursor(dictionary=True)
             
-            # جلب بيانات المستخدم والتحقق من رصيده
             cursor.execute("SELECT balance FROM users WHERE telegram_id = %s", (user_id,))
             user_data = cursor.fetchone()
             
-            # نفترض أن سعر المفتاح هو 10$ (يمكنك تعديله)
             key_price = 10.0
             
-            if user_data and user_data['balance'] >= key_price:
-                # جلب مفتاح واحد غير مستخدم
+            if user_data and float(user_data['balance']) >= key_price:
                 cursor.execute("SELECT code FROM `keys` WHERE status = 'unused' LIMIT 1")
                 key_data = cursor.fetchone()
                 
                 if key_data:
-                    # خصم الرصيد وتحديث حالة المفتاح
                     cursor.execute("UPDATE users SET balance = balance - %s WHERE telegram_id = %s", (key_price, user_id))
                     cursor.execute("UPDATE `keys` SET status = 'used' WHERE code = %s", (key_data['code'],))
                     conn.commit()
-                    
                     await update.message.reply_text(f"✅ **تم الشراء بنجاح!**\n\nإليك مفتاحك الخاص:\n`{key_data['code']}`", parse_mode="Markdown")
                 else:
-                    await update.message.reply_text("❌ عذراً، لا يوجد مفاتيح متوفرة في المخزن حالياً. تواصل مع الإدارة.")
+                    await update.message.reply_text("❌ عذراً، لا توجد مفاتيح متوفرة في المخزن حالياً. تواصل مع الإدارة.")
             else:
-                current_bal = user_data['balance'] if user_data else 0
+                current_bal = float(user_data['balance']) if user_data else 0.0
                 await update.message.reply_text(f"❌ رصيدك غير كافٍ! سعر المفتاح هو {key_price}$ ورصيدك الحالي هو {current_bal}$.")
             
             cursor.close()
@@ -143,9 +176,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"⚠️ خطأ أثناء عملية الشراء: {e}")
         return
 
-    # ==========================================
-    # ميزات الصفحة الثانية (User Page 2)
-    # ==========================================
     elif text == "👤 My Profile":
         try:
             conn = mysql.connector.connect(**db_config)
@@ -174,15 +204,9 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "🔄 Reset Fluorite":
         user_states[user_id] = 'awaiting_reset_code'
-        await update.message.reply_text(
-            "💎 **قسم إعادة التعيين (Reset) المباشر**\n\n"
-            "الرجاء إرسال الكود الذي تريد عمل رسيت له الآن:"
-        )
+        await update.message.reply_text("💎 الرجاء إرسال الكود الذي تريد عمل رسيت له الآن:")
         return
 
-    # ==========================================
-    # ميزات الأدمن (Admin Panel)
-    # ==========================================
     elif text == "👑 Admin Panel 👑" and user_id == ADMIN_ID:
         await update.message.reply_text("👑 أهلاً بك يا أدمن في لوحة التحكم الخاصة بك:", reply_markup=get_admin_keyboard())
         return
@@ -197,9 +221,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📝 أرسل الكوبون الجديد مع القيمة بالشكل التالي:\n `COUPON_CODE,AMOUNT`\nمثال: `FLOURITE100,50`")
         return
 
-    # ==========================================
-    # معالجة المدخلات النصية بناءً على الحالات (States)
-    # ==========================================
+    # معالجة المدخلات بناءً على الحالات
     if current_state == 'awaiting_reset_code':
         user_states[user_id] = None
         input_key = text.strip()
@@ -213,7 +235,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if cursor.rowcount > 0:
                 await update.message.reply_text(f"✅ **تم عمل Reset بنجاح!**\nالكود `{input_key}` جاهز للاستخدام.", parse_mode="Markdown")
             else:
-                await update.message.reply_text("❌ **فشل:** الكود غير موجود أو تم عمل reset له مسبقاً.")
+                await update.message.reply_text("❌ **فشل:** الكود غير موجود في قاعدة البيانات.")
             cursor.close()
             conn.close()
         except Exception as e:
@@ -230,7 +252,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             coupon = cursor.fetchone()
             
             if coupon:
-                cursor.execute("UPDATE users SET balance = balance + %s WHERE telegram_id = %s", (coupon['amount'], user_id))
+                cursor.execute("UPDATE users SET balance = balance + %s WHERE telegram_id = %s", (float(coupon['amount']), user_id))
                 cursor.execute("UPDATE coupons SET status = 'used' WHERE code = %s", (coupon_code,))
                 conn.commit()
                 await update.message.reply_text(f"🎉 **تهانينا!** تم شحن حسابك بمبلغ {coupon['amount']}$ بنجاح.")
@@ -254,7 +276,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.close()
             conn.close()
         except Exception as e:
-            await update.message.reply_text(f"⚠️ فشل إضافة المفتاح: {e}")
+            await update.message.reply_text(f"⚠️ فشل إضافة المفتاح (ربما مكرر): {e}")
         return
 
     elif current_state == 'admin_adding_coupon' and user_id == ADMIN_ID:
@@ -272,18 +294,21 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.close()
             conn.close()
         except Exception as e:
-            await update.message.reply_text(f"❌ صيغة خاطئة أو خطأ في النظام. تأكد من إرسالها كـ `CODE,AMOUNT`. التفاصيل: {e}")
+            await update.message.reply_text(f"❌ صيغة خاطئة. تأكد من إرسالها كـ `CODE,AMOUNT` بدون مسافات إضافية.")
         return
 
 # ==========================================
 # 5. تشغيل البوت
 # ==========================================
 def main():
+    # استدعاء دالة تجهيز قاعدة البيانات قبل تشغيل البوت
+    initialize_database()
+    
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
     
-    print("✅ البوت المتكامل يعمل الآن بكافة الميزات وأدوات الإدارة...")
+    print("✅ البوت يعمل الآن ومتصل بقاعدة البيانات...")
     app.run_polling()
 
 if __name__ == '__main__':
