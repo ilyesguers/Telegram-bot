@@ -4,6 +4,7 @@ import random
 import string
 import json
 import os
+mysql-connector-python
 
 # --- Configurations ---
 TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
