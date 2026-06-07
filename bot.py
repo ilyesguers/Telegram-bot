@@ -4,7 +4,17 @@ import random
 import string
 import json
 import os
-mysql-connector-python
+import mysql.connector
+
+# بيانات قاعدة بياناتك التي أنشأتها على Railway
+db_config = {
+    'host': 'mysql.railway.internal',
+    'user': 'root',
+    'password': 'yhjwurXoNTJQqiqiiWwrylGgqzymCCqB',
+    'database': 'railway',
+    'port': 3306
+}
+
 
 # --- Configurations ---
 TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
