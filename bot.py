@@ -108,10 +108,10 @@ def get_admin_keyboard():
     ], resize_keyboard=True)
 
 def get_user_keyboard():
-    # ترتيب الأزرار كما طلبت في الصورة
+    # تم توحيد النصوص لتعمل مع دالة الاستقبال
     return ReplyKeyboardMarkup([
-        [KeyboardButton(" Buy Key 🔑")],
-        [KeyboardButton(" Support "), KeyboardButton(" Log out 🚪")],
+        [KeyboardButton("🩷 Buy Key 🩷")],
+        [KeyboardButton("💙 Support 💙"), KeyboardButton("🚪 Log out 🚪")],
         [KeyboardButton("➡️ Next")]
     ], resize_keyboard=True)
 
@@ -501,7 +501,46 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif text == "🔄 Reset Fluorite":
-        await update.message.reply_text("🔄 **Reset Fluorite feature is currently empty (Under Development).**")
+        user_states[user_id] = 'awaiting_reset_code'
+        await update.message.reply_text(
+            "🔄 **قسم إعادة التعيين (Reset)** 💎\n\n"
+            "الرجاء إرسال **الكود (المفتاح)** الذي تريد عمل رسيت له الآن:\n\n"
+            "*(لإلغاء العملية، قم بالضغط على أي زر آخر في القائمة)*", 
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    # Processing Reset Code Input
+    if user_states.get(user_id) == 'awaiting_reset_code':
+        # التحقق إذا ضغط المستخدم على أي زر للإلغاء
+        if text in ["🩷 Buy Key 🩷", "💙 Support 💙", "🚪 Log out 🚪", "➡️ Next", "🔙 Back", "👤 My Profile", "🎫 Redeem Coupon", "🔄 Reset Fluorite"]:
+            user_states[user_id] = None
+            await show_user_welcome(update, user_id)
+            return
+
+        user_states[user_id] = None
+        reset_key = text.strip()
+
+        attractive_msg = (
+            f"✨ **تم تجهيز طلب الرسيت الخاص بك!** ✨\n\n"
+            f"🔑 **الكود:** `{reset_key}`\n"
+            f"*(اضغط على الكود لنسخه)*\n\n"
+            f"🤖 **الخطوة الأخيرة:**\n"
+            f"نظراً لسياسات الأمان، يرجى الضغط على الزر بالأسفل للذهاب إلى **بوت الرسيت الرسمي**، ثم الصق الكود هناك لإتمام العملية بنجاح. 🚀\n\n"
+            f"💧 *نحن نعمل دائماً لتوفير أفضل وأسرع الأدوات لك!*"
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("🤖 الذهاب لبوت الرسيت الرسمي", url="https://t.me/rskeyflubyhienios_bot")]
+        ]
+        
+        await update.message.reply_text(
+            attractive_msg, 
+            parse_mode="Markdown", 
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        await update.message.reply_text("⚙️ **العودة للقائمة:**", reply_markup=get_user_keyboard_page2())
         return
 
     # Processing Coupon Input
