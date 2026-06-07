@@ -14,7 +14,7 @@ BACKUP_FILE = "fluorite_backup.json"
 
 # --- Database & Variables ---
 ADMIN_LIST = {PRIMARY_ADMIN, SECONDARY_ADMIN}
-MAINTENANCE_MODE = False  # وضع الصيانة الافتراضي (تعطيل = False / تفعيل = True)
+MAINTENANCE_MODE = False  
 
 PRODUCTS = {
     "Fluorite Hack 💎": {"1": 5.0, "7": 15.0, "30": 40.0},
@@ -104,13 +104,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     admin_states[user_id] = user_states[user_id] = None
     
-    # حظر المستخدمين العاديين إذا كان وضع الصيانة مفعل
+    # حظر الصيانة الصارم للمستخدمين
     if MAINTENANCE_MODE and user_id not in ADMIN_LIST:
         maintenance_msg = (
-            "🛠️ **| سـرورنا تـحت الـتطويـر والـتحديث!**\n\n"
-            "مرحباً بك عزيزي العميل، نحن نقوم حالياً بإضافة باقات منتجات حصرية وتحديثات أمنية خارقة لضمان أفضل تجربة لك. ✨\n\n"
-            "⏳ **نعـود إليكم أقـوى قـريـباً جـداً!**\n"
-            f"👑 للدعم الفني السريع والاستفسارات: {SUPPORT_USER}"
+            "⚙️ **| عـذراً، المـتجر فـي وضـع الـصيانـة حـالـياً**\n\n"
+            "نحن نعمل على ترقية وتحديث الأنظمة وإضافة ميزات جديدة ومثيرة لضمان تقديم أفضل تجربة بيع آمنة لك! 🚀\n\n"
+            "⏳ **يرجى الانتظار، سنعود للعمل بكفاءة أعلى قريباً جداً...** ✨\n"
+            f"👑 للاستفسارات العاجلة، راسل الدعم: {SUPPORT_USER}"
         )
         await update.message.reply_text(maintenance_msg, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
         return
@@ -139,28 +139,28 @@ async def show_user_welcome(update: Update, user_id: int):
     )
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
 
-# --- Inline Callback Hub (Transparent Elegant Windows) ---
+# --- Inline Callback Hub ---
 async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     data = query.data
 
-    # منع استخدام الأزرار في وضع الصيانة لغير الآدمنز
+    # منع التفاعل نهائياً أثناء وضع الصيانة لغير المسؤولين
     if MAINTENANCE_MODE and user_id not in ADMIN_LIST:
         return
 
-    # User Clicking Main Shop Products
+    # User Checking Category Plans
     if data.startswith("shop_prod_"):
         prod = data.replace("shop_prod_", "")
         sym, rate = get_user_currency_info(user_id)
         
         buttons = []
-        for d, price in PRODUCTS[prod].items():
-            price_str = format_price(price, sym, rate)
-            buttons.append([InlineKeyboardButton(f"⏳ {d} Day(s) - {price_str}", callback_data=f"buy_{prod}_{d}")])
+        if prod in PRODUCTS:
+            for d, price in PRODUCTS[prod].items():
+                price_str = format_price(price, sym, rate)
+                buttons.append([InlineKeyboardButton(f"⏳ {d} Day(s) - {price_str}", callback_data=f"buy_{prod}_{d}")])
         buttons.append([InlineKeyboardButton("🔙 Back to Shop", callback_data="reload_shop")])
-        
         await query.edit_message_text(f"🛍️ **Product Plans for {prod}:**\n\nChoose your preferred duration package below:", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
@@ -207,22 +207,15 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(f"📝 **Almost done!**\nNow send the keys/codes (You can paste one or multiple lines):")
         return
 
-    # Admin: Modifying Rates or Day Separation
+    # Admin: Modifying Rates
     if data.startswith("adm_prc_"):
         prod = data.replace("adm_prc_", "")
         context.user_data["adm_prod"] = prod
         
-        # عرض خطط الأسعار الحالية أولاً
+        # عرض خطط الأسعار الحالية أولاً داخل مصفوفة الأزرار الشفافة الأنيقة
         buttons = [[InlineKeyboardButton(f"⚙️ Edit {d} Day Price", callback_data=f"adm_p_dur_{d}")] for d in PRODUCTS[prod].keys()]
-        # إضافة الزر المخصص لإضافة مدة جديدة لوحده تماماً بالأسفل بشكل أنيق جداً
-        buttons.append([InlineKeyboardButton("➕ Add New Custom Day Plan", callback_data="adm_add_custom_day")])
         
-        await query.edit_message_text(f"⚙️ Modifying rates for **{prod}**\nSelect plan duration or inject a new plan:", reply_markup=InlineKeyboardMarkup(buttons))
-        return
-
-    if data == "adm_add_custom_day":
-        admin_states[user_id] = "awaiting_custom_day_name"
-        await query.edit_message_text("⏱️ Send the number of days for the new custom plan (e.g., `20`):")
+        await query.edit_message_text(f"⚙️ Modifying rates for **{prod}**\nSelect a duration plan to edit:", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
     if data.startswith("adm_p_dur_"):
@@ -244,15 +237,15 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # --- Text Messaging Systems ---
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text.strip()
+    text = update.message.text.strip() if update.message.text else ""
 
-    # حظر الرسائل والنصوص تماماً للمستخدمين العاديين إذا كانت الصيانة مفعلة
+    # حظر الرسائل والنصوص تماماً أثناء وضع الصيانة لغير الآدمنز
     if MAINTENANCE_MODE and user_id not in ADMIN_LIST:
         maintenance_msg = (
-            "🛠️ **| سـرورنا تـحت الـتطويـر والـتحديث!**\n\n"
-            "مرحباً بك عزيزي العميل، نحن نقوم حالياً بإضافة باقات منتجات حصرية وتحديثات أمنية خارقة لضمان أفضل تجربة لك. ✨\n\n"
-            "⏳ **نعـود إليكم أقـوى قـريـباً جـداً!**\n"
-            f"👑 للدعم الفني السريع والاستفسارات: {SUPPORT_USER}"
+            "⚙️ **| عـذراً، المـتجر فـي وضـع الـصيانـة حـالـياً**\n\n"
+            "نحن نعمل على ترقية وتحديث الأنظمة وإضافة ميزات جديدة ومثيرة لضمان تقديم أفضل تجربة بيع آمنة لك! 🚀\n\n"
+            "⏳ **يرجى الانتظار، سنعود للعمل بكفاءة أعلى قريباً جداً...** ✨\n"
+            f"👑 للاستفسارات العاجلة، راسل الدعم: {SUPPORT_USER}"
         )
         await update.message.reply_text(maintenance_msg, parse_mode="Markdown")
         return
@@ -294,8 +287,15 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         elif text == "⚙️ Edit Prices":
+            # هنا يتم عرض المنتجات بالإضافة إلى زر منفصل ومستقل تماماً لإضافة خطة يومية مخصصة جديدة
             buttons = [[InlineKeyboardButton(prod, callback_data=f"adm_prc_{prod}")] for prod in PRODUCTS.keys()]
-            await update.message.reply_text("⚙️ **Select product to adjust price or add standalone custom plans:**", reply_markup=InlineKeyboardMarkup(buttons))
+            admin_markup = InlineKeyboardMarkup(buttons)
+            
+            # إرسال لوحة التحكم بالمنتجات، ثم إرسال زر الخطة اليومية المخصصة بشكل مستقل تماماً كما طلبت
+            await update.message.reply_text("⚙️ **Select a product to edit its current plan prices:**", reply_markup=admin_markup)
+            
+            custom_plan_btn = [[InlineKeyboardButton("➕ Add New Custom Daily Plan", callback_data="adm_add_custom_day")]]
+            await update.message.reply_text("✨ **Or add a completely new standalone plan to any product:**", reply_markup=InlineKeyboardMarkup(custom_plan_btn))
             return
 
         elif text == "🗑️ Delete Key":
@@ -328,14 +328,45 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             PRODUCTS[text] = {}
             fluorite_stock[text] = {}
             save_system_backup()
-            await update.message.reply_text(f"✅ Product **{text}** created successfully! Now you can adjust its prices and add custom duration plans anytime.", reply_markup=get_admin_keyboard())
+            await update.message.reply_text(f"✅ Product **{text}** created successfully!", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
 
         elif state == 'awaiting_custom_day_name':
-            context.user_data["adm_dur"] = text
-            admin_states[user_id] = "awaiting_raw_price"
-            await update.message.reply_text(f"💵 Great! Now enter the price for this **{text} Day(s)** plan:")
-            return
+            # طلب تحديد لأي منتج تتبع هذه الخطة اليومية الجديدة أولاً لتفادي أي تداخل برميجي
+            context.user_data["custom_inject_day"] = text
+            buttons = [[InlineKeyboardButton(prod, callback_data=f"inject_day_to_{prod}")] for prod in PRODUCTS.keys()]
+            await update.message.reply_text(f"⏱️ Plan duration set to `{text}` Days.\nNow select which product category to assign this plan to:", reply_markup=InlineKeyboardMarkup(buttons))
+            admin_states[user_id] = None; return
+
+        elif state == 'awaiting_raw_price':
+            p_name = context.user_data.get("adm_prod")
+            p_days = context.user_data.get("adm_dur")
+            try:
+                new_val = float(text)
+                if p_name in PRODUCTS:
+                    PRODUCTS[p_name][p_days] = new_val
+                    if p_name not in fluorite_stock: fluorite_stock[p_name] = {}
+                    if p_days not in fluorite_stock[p_name]: fluorite_stock[p_name][p_days] = []
+                    save_system_backup()
+                    await update.message.reply_text(f"✅ Price updated! **{p_name} ({p_days}D)** is now `{new_val}$`", reply_markup=get_admin_keyboard())
+                else:
+                    await update.message.reply_text("❌ Error: Product not found.", reply_markup=get_admin_keyboard())
+            except: await update.message.reply_text("❌ Numerical digits only. Update failed.", reply_markup=get_admin_keyboard())
+            admin_states[user_id] = None; return
+
+        elif state == 'awaiting_custom_inject_price':
+            p_name = context.user_data.get("adm_prod")
+            p_days = context.user_data.get("custom_inject_day")
+            try:
+                new_val = float(text)
+                if p_name not in PRODUCTS: PRODUCTS[p_name] = {}
+                PRODUCTS[p_name][p_days] = new_val
+                if p_name not in fluorite_stock: fluorite_stock[p_name] = {}
+                if p_days not in fluorite_stock[p_name]: fluorite_stock[p_name][p_days] = []
+                save_system_backup()
+                await update.message.reply_text(f"✅ Custom daily plan injected perfectly! **{p_name} ({p_days} Days)** configured to `{new_val}$`", reply_markup=get_admin_keyboard())
+            except: await update.message.reply_text("❌ Invalid price digits. Action cancelled.", reply_markup=get_admin_keyboard())
+            admin_states[user_id] = None; return
 
         elif state == 'await_coup':
             try:
@@ -360,19 +391,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else: await update.message.reply_text("⚠️ Processing error, please try again.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
 
-        elif state == 'awaiting_raw_price':
-            p_name = context.user_data.get("adm_prod")
-            p_days = context.user_data.get("adm_dur")
-            try:
-                new_val = float(text)
-                PRODUCTS[p_name][p_days] = new_val
-                if p_name not in fluorite_stock: fluorite_stock[p_name] = {}
-                if p_days not in fluorite_stock[p_name]: fluorite_stock[p_name][p_days] = []
-                save_system_backup()
-                await update.message.reply_text(f"✅ Price updated! **{p_name} ({p_days}D)** is now `{new_val}$`", reply_markup=get_admin_keyboard())
-            except: await update.message.reply_text("❌ Numerical digits only. Update failed.", reply_markup=get_admin_keyboard())
-            admin_states[user_id] = None; return
-
         elif state == 'await_del':
             f = False
             for pr, dy in fluorite_stock.items():
@@ -386,6 +404,11 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: ADMIN_LIST.add(int(text)); save_system_backup(); await update.message.reply_text("👑 Admin added successfully.", reply_markup=get_admin_keyboard())
             except: await update.message.reply_text("Invalid ID.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
+
+    # نظام التقاط تعيين منتج الخطة المخصصة المنفصلة
+    if user_id in ADMIN_LIST and data := context.user_data.get("custom_inject_day"):
+        # فحص ضغطات اختيار كود الحقن للمنتج المستهدف
+        pass
 
     if user_id in ADMIN_LIST and text == "🔙 Admin Panel":
         admin_view_mode[user_id] = 'admin'
@@ -439,7 +462,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text.lower() == "ok":
             p_name = context.user_data.get("selected_product")
             p_days = context.user_data.get("selected_days")
-            price = PRODUCTS[p_name][p_days]
+            price = PRODUCTS.get(p_name, {}).get(p_days, 0.0)
             
             if user_balances.get(user_id, 0.0) >= price:
                 if fluorite_stock.get(p_name, {}).get(p_days):
@@ -464,12 +487,33 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_balances.get(user_id, 0.0) == 0 and user_id not in ADMIN_LIST:
         await update.message.reply_text(f"👋 **Shop Locked**\n\nPlease add some funds first to start shopping.\n👑 **Support for top-up / login:** {SUPPORT_USER}", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
-    else: await update.message.reply_text("ℹ️ Please use the menu buttons to control.", reply_markup=get_user_keyboard(user_id))
+    else: 
+        if text: await update.message.reply_text("ℹ️ Please use the menu buttons to control.", reply_markup=get_user_keyboard(user_id))
+
+# معالج مستقل لضغطات أزرار وضع حقن المدد المخصصة لعدم حدوث كراش مع دوال تعديل الأسعار
+async def handling_inject_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+    user_id = query.from_user.id
+    
+    if data == "adm_add_custom_day":
+        if user_id not in ADMIN_LIST: return
+        admin_states[user_id] = "awaiting_custom_day_name"
+        await query.edit_message_text("⏱️ Send the number of days for the new standalone custom plan (e.g., `20`):")
+        return
+        
+    if data.startswith("inject_day_to_"):
+        prod_target = data.replace("inject_day_to_", "")
+        context.user_data["adm_prod"] = prod_target
+        admin_states[user_id] = "awaiting_custom_inject_price"
+        await query.edit_message_text(f"💵 Perfect! Now send the **Price in USD ($)** for this new custom plan under `{prod_target}`:")
+        return
 
 if __name__ == '__main__':
     application = ApplicationBuilder().token(TOKEN).build()
     application.add_handler(CommandHandler('start', start))
+    application.add_handler(CallbackQueryHandler(handling_inject_callbacks, pattern="^(adm_add_custom_day|inject_day_to_.*)$"))
     application.add_handler(CallbackQueryHandler(shop_menu_callback))
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_messages))
-    print("🏪 Advanced Transparent Store with Maintenance Running...")
+    print("🏪 Advanced Protected Store Running Seamlessly...")
     application.run_polling()
