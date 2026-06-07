@@ -21,7 +21,7 @@ APPROVED_ACCOUNTS = {
     "demo_key": "pass123" 
 }
 
-# لتتبع مستخدمي البوت (مهم جداً لميزة الإرسال الجماعي)
+# لتتبع مستخدمي البوت
 all_bot_users = set()
 authenticated_users = set()
 
@@ -38,7 +38,7 @@ fluorite_stock = {
     "Drip Hack 💧": {"1": ["DRIP-1DAY-1111"], "7": ["DRIP-7DAY-2222"], "30": ["DRIP-30DAY-3333"]}
 }
 
-# دالة إخفاء منتصف الأكواد للتسويق الوهمي أو الحقيقي لحمايتها من النسخ والتطفل
+# دالة إخفاء منتصف الأكواد للتسويق الوهمي أو الحقيقي لحمايتها من النسخ
 def mask_credential(text):
     if not text:
         return ""
@@ -49,9 +49,13 @@ def mask_credential(text):
 
 def mask_string(s):
     s_len = len(s)
-    if s_len <= 4:
-        return s[0] + "***" + s[-1] if s_len > 1 else "***"
-    return s[:2] + "*" * (s_len - 4) + s[-2:]
+    if s_len <= 6:
+        return s[0] + "****" + s[-1] if s_len > 1 else "****"
+    return s[:4] + "*" * (s_len - 8) + s[-4:]
+
+# دالة توليد كود عشوائي تماماً من 16 رمزاً مثل صيغة صورة العميل
+def generate_random_16_code():
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))
 
 # --- Auto/Manual Backup System ---
 def save_system_backup():
@@ -108,8 +112,9 @@ def get_admin_keyboard():
         [KeyboardButton("🎫 Mint Coupon"), KeyboardButton("📦 Add Keys")],
         [KeyboardButton("⚙️ Edit Prices"), KeyboardButton("🗑️ Delete Key")],
         [KeyboardButton("👥 Add Admin"), KeyboardButton("👤 Create Login Pass")],
-        [KeyboardButton("📢 Broadcast"), KeyboardButton("📊 Statistics")],
-        [KeyboardButton("💾 Save Backup"), KeyboardButton("👤 View as User")]
+        [KeyboardButton("📢 Broadcast"), KeyboardButton("🪄 Fake Sale Promo")],
+        [KeyboardButton("📊 Statistics"), KeyboardButton("💾 Save Backup")],
+        [KeyboardButton("👤 View as User")]
     ], resize_keyboard=True)
 
 def get_user_keyboard(user_id):
@@ -126,7 +131,7 @@ def get_user_keyboard(user_id):
 # --- Start Command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    all_bot_users.add(user_id) # حفظ ايدي العميل للإذاعة الجماعية لاحقاً
+    all_bot_users.add(user_id) 
     admin_states[user_id] = user_states[user_id] = None
 
     if user_id not in user_balances: user_balances[user_id] = 0.0
@@ -345,6 +350,11 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             admin_states[user_id] = 'await_broadcast_message'
             await update.message.reply_text("📝 **أرسل الآن الرسالة التي تريد تعميمها ونشرها في القناة ولجميع مستخدمي البوت:**", reply_markup=ReplyKeyboardRemove())
             return
+
+        elif text == "🪄 Fake Sale Promo":
+            admin_states[user_id] = 'await_fake_sale_confirmation'
+            await update.message.reply_text("⚠️ **تأكيد الإجراء:**\nالرجاء كتابة كلمة `تأكيد` لإنشاء ونشر إشعار الشراء الوهمي لـ Fluorite في القناة فوراً:", reply_markup=ReplyKeyboardRemove())
+            return
             
         elif text == "📊 Statistics":
             msg = f"🎫 **Active Coupons:** {', '.join([f'`{k}: {v}$`' for k,v in active_coupons.items()])}\n👥 **Total Authorized Accounts:** `{len(APPROVED_ACCOUNTS)}` accounts\n📢 **Total Bot Observers:** `{len(all_bot_users)}` users\n\n📦 **Current Stock:**\n"
@@ -366,20 +376,44 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Processing Admin Input States
         state = admin_states.get(user_id)
         
-        if state == 'await_broadcast_message':
+        if state == 'await_fake_sale_confirmation':
+            admin_states[user_id] = None
+            if text == "تأكيد":
+                # توليد كود عشوائي 16 رمزاً بنفس صيغة صورة العميل
+                raw_fake_16_code = generate_random_16_code()
+                masked_fake_code = mask_credential(raw_fake_16_code)
+                
+                # صياغة الرسالة بالمصطلحات والكلمات الإيجابية الإنجليزية تماماً
+                attractive_fake_msg = (
+                    f"🔥 **NEW SUCCESSFUL PURCHASE!** 🔥\n\n"
+                    f"⚡ **SOMEONE JUST BOUGHT A FLUORITE CODE NOW!** ⚡\n"
+                    f"📈 **STORE IS ON FIRE!** 📈\n\n"
+                    f"🤝 *Thank you for your endless trust in us! We promise to always deliver the latest updates and the absolute best tools for you!* ✨💎\n\n"
+                    f"📥 **The code obtained by the user:**\n"
+                    f"👉 `{masked_fake_code}` 🚀"
+                )
+                
+                try:
+                    await context.bot.send_message(chat_id=CHANNEL_ID, text=attractive_fake_msg, parse_mode="Markdown")
+                    await update.message.reply_text("✅ **[نجاح]** تم التحقق ونشر الإشعار المشتعل باللغة الإنجليزية في القناة بنجاح!", reply_markup=get_admin_keyboard())
+                except Exception as e:
+                    await update.message.reply_text(f"❌ تم التأكيد لكن فشل الإرسال للقناة (تأكد من صلاحيات البوت). الخطأ: {e}", reply_markup=get_admin_keyboard())
+            else:
+                await update.message.reply_text("❌ إلغاء الإجراء، الكلمة التي أدخلتها ليست `تأكيد`.", reply_markup=get_admin_keyboard())
+            return
+
+        elif state == 'await_broadcast_message':
             admin_states[user_id] = None
             success_count = 0
             fail_count = 0
             await update.message.reply_text(f"⏳ جاري النشر في القناة وبدء النشر الجماعي لـ {len(all_bot_users)} مستخدم...")
             
-            # 1. النشر في القناة المربوطة تلقائياً
             try:
                 await context.bot.send_message(chat_id=CHANNEL_ID, text=text)
                 channel_status = "✅ تم النشر في القناة بنجاح!"
             except Exception as e:
-                channel_status = f"❌ فشل النشر في القناة (تأكد أن البوت آدمن ولديه صلاحية إرسال الرسائل). الخطأ: {e}"
+                channel_status = f"❌ فشل النشر في القناة. الخطأ: {e}"
                 
-            # 2. النشر لجميع مستخدمي البوت في الخاص
             for u_id in list(all_bot_users):
                 try:
                     await context.bot.send_message(chat_id=u_id, text=text)
@@ -392,7 +426,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📺 **حالة القناة:**\n{channel_status}\n\n"
                 f"👥 **حالة المشتركين في الخاص:**\n"
                 f"✅ تم التسليم لـ: `{success_count}` مستخدم.\n"
-                f"❌ فشل الإرسال لـ: `{fail_count}` مستخدم (قاموا بحظر البوت)."
+                f"❌ فشل الإرسال لـ: `{fail_count}` مستخدم."
             )
             await update.message.reply_text(report_msg, parse_mode="Markdown", reply_markup=get_admin_keyboard())
             return
@@ -544,9 +578,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     user_balances[user_id] -= price
                     save_system_backup()
                     
-                    # إخفاء منتصف الأكواد الحقيقية والوهمية لحماية الخصوصية ومنع النسخ العشوائي والتأكد
                     masked_output = mask_credential(raw_key)
-                    
                     await update.message.reply_text(f"🎉 **Awesome! Purchase successful:**\n\n`{masked_output}`\n\nHave fun using it! ✨", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
                 else: await update.message.reply_text(f"⚠️ Oh no! We are out of stock. Please ask {SUPPORT_USER}", reply_markup=get_user_keyboard(user_id))
             else: await update.message.reply_text(f"❌ Your balance is not enough.", reply_markup=get_user_keyboard(user_id))
