@@ -8,7 +8,7 @@ import os
 # --- Configurations ---
 TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
 PRIMARY_ADMIN = 5145154527
-SECONDARY_ADMIN = 8300889547  # المسؤول الدائم المضاف
+SECONDARY_ADMIN = 8300889547  # المسؤول الدائم الآخر
 SUPPORT_USER = "@i6issiiiii"
 BACKUP_FILE = "fluorite_backup.json"
 
@@ -75,6 +75,7 @@ def format_price(usd_amount, symbol, rate):
 # --- Keyboards ---
 def get_admin_keyboard():
     return ReplyKeyboardMarkup([
+        [KeyboardButton("➕ Add Product"), KeyboardButton("❌ Delete Product")],
         [KeyboardButton("🎫 Mint Coupon"), KeyboardButton("📦 Add Keys")],
         [KeyboardButton("⚙️ Edit Prices"), KeyboardButton("🗑️ Delete Key")],
         [KeyboardButton("👥 Add Admin"), KeyboardButton("📊 Statistics")],
@@ -120,14 +121,35 @@ async def show_user_welcome(update: Update, user_id: int):
     )
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
 
-# --- Simple Inline Clicks Hub ---
+# --- Simple Inline Clicks Hub (The Transparent Elegant Panels) ---
 async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     data = query.data
 
-    # User Store Buying
+    # User Clicking Main Shop Products
+    if data.startswith("shop_prod_"):
+        prod = data.replace("shop_prod_", "")
+        sym, rate = get_user_currency_info(user_id)
+        
+        # عرض المدد المتاحة لهذا المنتج داخل أزرار شفافة مخصصة له
+        buttons = []
+        for d, price in PRODUCTS[prod].items():
+            price_str = format_price(price, sym, rate)
+            buttons.append([InlineKeyboardButton(f"⏳ {d} Day(s) - {price_str}", callback_data=f"buy_{prod}_{d}")])
+        buttons.append([InlineKeyboardButton("🔙 Back to Shop", callback_data="reload_shop")])
+        
+        await query.edit_message_text(f"🛍️ **Product Plans for {prod}:**\n\nChoose your preferred duration package below:", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data == "reload_shop":
+        # إعادة عرض المنتجات الرئيسية
+        buttons = [[InlineKeyboardButton(f"📦 {prod}", callback_data=f"shop_prod_{prod}")] for prod in PRODUCTS.keys()]
+        await query.edit_message_text("🛒 **Welcome to our Shop!**\n\nSelect a product category to view plans:", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    # User Order Buying Check out
     if data.startswith("buy_"):
         parts = data.split("_")
         selected_prod = parts[1]
@@ -150,7 +172,7 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(checkout_msg, parse_mode="Markdown")
         return
 
-    # Step-by-Step Keys Adding (Admin)
+    # Admin: Step-by-Step Keys Adding
     if data.startswith("adm_add_"):
         prod = data.replace("adm_add_", "")
         context.user_data["adm_prod"] = prod
@@ -165,12 +187,19 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(f"📝 **Almost done!**\nNow send the keys/codes (You can paste one or multiple lines):")
         return
 
-    # Step-by-Step Price Customization (Admin)
+    # Admin: Step-by-Step Price Customization (Transparent elegant fields like image_2.png)
     if data.startswith("adm_prc_"):
         prod = data.replace("adm_prc_", "")
         context.user_data["adm_prod"] = prod
         buttons = [[InlineKeyboardButton(f"⚙️ Edit {d} Day Price", callback_data=f"adm_p_dur_{d}")] for d in PRODUCTS[prod].keys()]
+        # زر إضافي لإدخال مدة جديدة يدوياً تماماً كطلبك (مثال 20 يوم)
+        buttons.append([InlineKeyboardButton("➕ Add New Custom Day Plan", callback_data="adm_add_custom_day")])
         await query.edit_message_text(f"⚙️ Modifying rates for **{prod}**\nSelect plan duration:", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data == "adm_add_custom_day":
+        admin_states[user_id] = "awaiting_custom_day_name"
+        await query.edit_message_text("⏱️ Send the number of days for the new plan (e.g., `20`):")
         return
 
     if data.startswith("adm_p_dur_"):
@@ -178,6 +207,15 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["adm_dur"] = dur
         admin_states[user_id] = "awaiting_raw_price"
         await query.edit_message_text(f"💵 Please send the **New Price in USD ($)** for this plan (numbers only):")
+        return
+
+    # Admin: Delete Entire Product Category
+    if data.startswith("adm_del_p_"):
+        prod = data.replace("adm_del_p_", "")
+        if prod in PRODUCTS: del PRODUCTS[prod]
+        if prod in fluorite_stock: del fluorite_stock[prod]
+        save_system_backup()
+        await query.edit_message_text(f"✅ Product **{prod}** has been completely deleted from store.")
         return
 
 # --- Text Messaging Systems ---
@@ -193,7 +231,17 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- Admin Interactive Panel ---
     if user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
-        if text == "🎫 Mint Coupon":
+        if text == "➕ Add Product":
+            admin_states[user_id] = 'await_new_prod_name'
+            await update.message.reply_text("📝 Enter the name of the new product/cheat to add:", reply_markup=ReplyKeyboardRemove())
+            return
+
+        elif text == "❌ Delete Product":
+            buttons = [[InlineKeyboardButton(f"🗑️ Delete {prod}", callback_data=f"adm_del_p_{prod}")] for prod in PRODUCTS.keys()]
+            await update.message.reply_text("⚠️ **Select product to delete permanently:**", reply_markup=InlineKeyboardMarkup(buttons))
+            return
+
+        elif text == "🎫 Mint Coupon":
             admin_states[user_id] = 'await_coup'
             await update.message.reply_text("💵 Enter coupon value in USD (numbers only):", reply_markup=ReplyKeyboardRemove())
             return
@@ -234,7 +282,20 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Processing States
         state = admin_states.get(user_id)
-        if state == 'await_coup':
+        if state == 'await_new_prod_name':
+            PRODUCTS[text] = {}
+            fluorite_stock[text] = {}
+            save_system_backup()
+            await update.message.reply_text(f"✅ Product **{text}** created successfully! Now you can adjust its prices and add custom duration plans anytime.", reply_markup=get_admin_keyboard())
+            admin_states[user_id] = None; return
+
+        elif state == 'awaiting_custom_day_name':
+            context.user_data["adm_dur"] = text
+            admin_states[user_id] = "awaiting_raw_price"
+            await update.message.reply_text(f"💵 Great! Now enter the price for this **{text} Day(s)** plan:")
+            return
+
+        elif state == 'await_coup':
             try:
                 val = float(text)
                 code = "FL-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -249,7 +310,8 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p_days = context.user_data.get("adm_dur")
             input_keys = [line.strip() for line in text.split('\n') if line.strip()]
             
-            if p_name in fluorite_stock and p_days in fluorite_stock[p_name]:
+            if p_name in fluorite_stock:
+                if p_days not in fluorite_stock[p_name]: fluorite_stock[p_name][p_days] = []
                 fluorite_stock[p_name][p_days].extend(input_keys)
                 save_system_backup()
                 await update.message.reply_text(f"✅ Loaded {len(input_keys)} keys to **{p_name} ({p_days} Days)** successfully!", reply_markup=get_admin_keyboard())
@@ -262,6 +324,8 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 new_val = float(text)
                 PRODUCTS[p_name][p_days] = new_val
+                if p_name not in fluorite_stock: fluorite_stock[p_name] = {}
+                if p_days not in fluorite_stock[p_name]: fluorite_stock[p_name][p_days] = []
                 save_system_backup()
                 await update.message.reply_text(f"✅ Price updated! **{p_name} ({p_days}D)** is now `{new_val}$`", reply_markup=get_admin_keyboard())
             except: await update.message.reply_text("❌ Numerical digits only. Update failed.", reply_markup=get_admin_keyboard())
@@ -297,28 +361,9 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     elif text == "🛒 Shop":
-        # عرض المنتجات بنظام قنوات التلغرام لبيع الهاكات بشكل منفصل وجميل جداً
-        for prod_name, durations in PRODUCTS.items():
-            # بناء الرسالة التسويقية المستقلة لكل هاك
-            shop_msg = (
-                f"🔥 **{prod_name.upper()} CHANNEL** 🔥\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"🚀 Status: `⚠️ Working / Safe`\n"
-                f"ℹ️ Description: Best choice for safe and smooth gaming!\n\n"
-                f"💵 **PRICES & PLANS:**\n"
-            )
-            
-            row_buttons = []
-            for days, price in durations.items():
-                price_str = format_price(price, sym, rate)
-                shop_msg += f" ▫️ {days} Day(s) ➔ `{price_str}`\n"
-                
-                # أزرار الشراء المباشرة أسفل رسالة الهاك
-                btn_label = f"🛒 Buy {days}D"
-                row_buttons.append(InlineKeyboardButton(btn_label, callback_data=f"buy_{prod_name}_{days}"))
-                
-            shop_msg += "━━━━━━━━━━━━━━━━━━━━"
-            await update.message.reply_text(shop_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([row_buttons]))
+        # عرض المنتجات الأساسية كخانات شفافة أنيقة وعصرية جداً داخل الشات
+        buttons = [[InlineKeyboardButton(f"📦 {prod}", callback_data=f"shop_prod_{prod}")] for prod in PRODUCTS.keys()]
+        await update.message.reply_text("🛒 **Welcome to our Shop!**\n\nSelect a product category to view plans:", reply_markup=InlineKeyboardMarkup(buttons))
         return
         
     elif text == "💳 Add Funds":
@@ -356,7 +401,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             price = PRODUCTS[p_name][p_days]
             
             if user_balances.get(user_id, 0.0) >= price:
-                if fluorite_stock[p_name][p_days]:
+                if fluorite_stock.get(p_name, {}).get(p_days):
                     key = fluorite_stock[p_name][p_days].pop(0)
                     user_balances[user_id] -= price
                     save_system_backup()
@@ -385,5 +430,5 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CallbackQueryHandler(shop_menu_callback))
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_messages))
-    print("🏪 Beautiful Channel-Style Store running successfully...")
+    print("🏪 Fully Transparent Elegant Store running perfectly...")
     application.run_polling()
