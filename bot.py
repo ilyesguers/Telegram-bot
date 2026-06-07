@@ -10,18 +10,19 @@ TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
 PRIMARY_ADMIN = 5145154527
 SECONDARY_ADMIN = 8300889547  
 SUPPORT_USER = "@i6issiiiii"
+CHANNEL_ID = "@TQA_CHANNEL"  # معرف قناتك (SISI MODE) المربوطة بالبوت
 BACKUP_FILE = "fluorite_backup.json"
 
 # --- Database & Variables ---
 ADMIN_LIST = {PRIMARY_ADMIN, SECONDARY_ADMIN}
 
-# قاعدة بيانات الحسابات المسموح لها بالدخول (الآدمن ينشئها)
-# الصيغة: {"loginkey": "password"}
+# قاعدة بيانات الحسابات المسموح لها بالدخول
 APPROVED_ACCOUNTS = {
-    "demo_key": "pass123" # حساب تجريبي تلقائي
+    "demo_key": "pass123" 
 }
 
-# لتتبع من قام بتسجيل الدخول بنجاح من المستخدمين
+# لتتبع مستخدمي البوت (مهم جداً لميزة الإرسال الجماعي)
+all_bot_users = set()
 authenticated_users = set()
 
 PRODUCTS = {
@@ -37,18 +38,33 @@ fluorite_stock = {
     "Drip Hack 💧": {"1": ["DRIP-1DAY-1111"], "7": ["DRIP-7DAY-2222"], "30": ["DRIP-30DAY-3333"]}
 }
 
+# دالة إخفاء منتصف الأكواد للتسويق الوهمي أو الحقيقي لحمايتها من النسخ والتطفل
+def mask_credential(text):
+    if not text:
+        return ""
+    if ":" in text:
+        parts = text.split(":", 1)
+        return f"{mask_string(parts[0])}:{mask_string(parts[1])}"
+    return mask_string(text)
+
+def mask_string(s):
+    s_len = len(s)
+    if s_len <= 4:
+        return s[0] + "***" + s[-1] if s_len > 1 else "***"
+    return s[:2] + "*" * (s_len - 4) + s[-2:]
+
 # --- Auto/Manual Backup System ---
 def save_system_backup():
     backup_data = {
         "admins": list(ADMIN_LIST), "balances": user_balances, "currencies": user_currencies,
         "countries": user_countries, "coupons": active_coupons, "stock": fluorite_stock, 
-        "products": PRODUCTS, "accounts": APPROVED_ACCOUNTS
+        "products": PRODUCTS, "accounts": APPROVED_ACCOUNTS, "all_users": list(all_bot_users)
     }
     with open(BACKUP_FILE, "w", encoding="utf-8") as f:
         json.dump(backup_data, f, ensure_ascii=False, indent=4)
 
 def load_system_backup():
-    global ADMIN_LIST, user_balances, user_currencies, user_countries, active_coupons, fluorite_stock, PRODUCTS, APPROVED_ACCOUNTS
+    global ADMIN_LIST, user_balances, user_currencies, user_countries, active_coupons, fluorite_stock, PRODUCTS, APPROVED_ACCOUNTS, all_bot_users
     if os.path.exists(BACKUP_FILE):
         try:
             with open(BACKUP_FILE, "r", encoding="utf-8") as f:
@@ -62,6 +78,7 @@ def load_system_backup():
                 fluorite_stock = data.get("stock", {})
                 PRODUCTS = data.get("products", PRODUCTS)
                 APPROVED_ACCOUNTS = data.get("accounts", APPROVED_ACCOUNTS)
+                all_bot_users = set(data.get("all_users", []))
         except Exception as e: print(f"Backup load failed: {e}")
 
 load_system_backup()
@@ -91,8 +108,8 @@ def get_admin_keyboard():
         [KeyboardButton("🎫 Mint Coupon"), KeyboardButton("📦 Add Keys")],
         [KeyboardButton("⚙️ Edit Prices"), KeyboardButton("🗑️ Delete Key")],
         [KeyboardButton("👥 Add Admin"), KeyboardButton("👤 Create Login Pass")],
-        [KeyboardButton("📊 Statistics"), KeyboardButton("💾 Save Backup")],
-        [KeyboardButton("👤 View as User")]
+        [KeyboardButton("📢 Broadcast"), KeyboardButton("📊 Statistics")],
+        [KeyboardButton("💾 Save Backup"), KeyboardButton("👤 View as User")]
     ], resize_keyboard=True)
 
 def get_user_keyboard(user_id):
@@ -109,21 +126,19 @@ def get_user_keyboard(user_id):
 # --- Start Command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    all_bot_users.add(user_id) # حفظ ايدي العميل للإذاعة الجماعية لاحقاً
     admin_states[user_id] = user_states[user_id] = None
 
     if user_id not in user_balances: user_balances[user_id] = 0.0
     if user_id not in user_countries: user_countries[user_id] = random.choice(["SA", "EG", "AE", "DZ", "IQ"])
 
-    # الآدمن يدخل مباشرة دون الحاجة لتسجيل دخول زبون
     if user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
         await update.message.reply_text("⚡ **Welcome back, Boss! Control Panel is ready:**", reply_markup=get_admin_keyboard())
         return
 
-    # فحص إذا كان المستخدم العادي مسجل دخول مسبقاً، وإظهار رسالة القفل الترحيبية الاحترافية إذا لم يكن مسجلاً
     if user_id not in authenticated_users and user_id not in ADMIN_LIST:
         user_states[user_id] = "awaiting_login_credentials"
         
-        # الرسالة الترحيبية الاحترافية والجذابة جداً باللغتين كما طلبت
         welcome_secure_msg = (
             "🔒 **مرحباً بك في متجر الجملة السري والحصري!**\n"
             "✨ *هذا البوت محمي ومخصص للأعضاء المصرح لهم فقط بأسعار رخيصة جداً.*\n\n"
@@ -166,7 +181,6 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if user_id not in authenticated_users and user_id not in ADMIN_LIST:
         return
 
-    # User Checking Category Plans
     if data.startswith("shop_prod_"):
         prod = data.replace("shop_prod_", "")
         sym, rate = get_user_currency_info(user_id)
@@ -185,7 +199,6 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("🛒 **Welcome to our Shop!**\n\nSelect a product category to view plans:", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # User Order Buying Checkout
     if data.startswith("buy_"):
         parts = data.split("_")
         selected_prod = parts[1]
@@ -208,7 +221,6 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(checkout_msg, parse_mode="Markdown")
         return
 
-    # Admin: Step-by-Step Keys Adding
     if data.startswith("adm_add_"):
         prod = data.replace("adm_add_", "")
         context.user_data["adm_prod"] = prod
@@ -223,11 +235,9 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(f"📝 **Almost done!**\nNow send the keys/codes (You can paste one or multiple lines):")
         return
 
-    # Admin: Modifying Rates
     if data.startswith("adm_prc_"):
         prod = data.replace("adm_prc_", "")
         context.user_data["adm_prod"] = prod
-        
         buttons = [[InlineKeyboardButton(f"⚙️ Edit {d} Day Price", callback_data=f"adm_p_dur_{d}")] for d in PRODUCTS[prod].keys()]
         await query.edit_message_text(f"⚙️ Modifying rates for **{prod}**\nSelect a duration plan to edit:", reply_markup=InlineKeyboardMarkup(buttons))
         return
@@ -239,7 +249,6 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(f"💵 Please send the **New Price in USD ($)** for this plan (numbers only):")
         return
 
-    # Admin: Delete Entire Product Category
     if data.startswith("adm_del_p_"):
         prod = data.replace("adm_del_p_", "")
         if prod in PRODUCTS: del PRODUCTS[prod]
@@ -252,8 +261,8 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip() if update.message.text else ""
+    all_bot_users.add(user_id)
 
-    # نظام فحص وتسجيل دخول المستخدم العادي
     if user_id not in authenticated_users and user_id not in ADMIN_LIST:
         if user_states.get(user_id) == "awaiting_login_credentials":
             if ":" in text:
@@ -329,10 +338,16 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         elif text == "👤 Create Login Pass":
             admin_states[user_id] = 'await_create_user_account'
-            await update.message.reply_text("📝 أرسل الحساب الجديد الذي تريد إنشائه للزبون بالصيغة التالية:\n`loginkey:password`", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text("📝 أرسل الحساب الجديد للزبون بالصيغة التالية:\n`loginkey:password`", reply_markup=ReplyKeyboardRemove())
             return
+            
+        elif text == "📢 Broadcast":
+            admin_states[user_id] = 'await_broadcast_message'
+            await update.message.reply_text("📝 **أرسل الآن الرسالة التي تريد تعميمها ونشرها في القناة ولجميع مستخدمي البوت:**", reply_markup=ReplyKeyboardRemove())
+            return
+            
         elif text == "📊 Statistics":
-            msg = f"🎫 **Active Coupons:** {', '.join([f'`{k}: {v}$`' for k,v in active_coupons.items()])}\n👥 **Total Authorized Accounts:** `{len(APPROVED_ACCOUNTS)}` accounts\n\n📦 **Current Stock:**\n"
+            msg = f"🎫 **Active Coupons:** {', '.join([f'`{k}: {v}$`' for k,v in active_coupons.items()])}\n👥 **Total Authorized Accounts:** `{len(APPROVED_ACCOUNTS)}` accounts\n📢 **Total Bot Observers:** `{len(all_bot_users)}` users\n\n📦 **Current Stock:**\n"
             for p, d in fluorite_stock.items():
                 msg += f"🔹 `{p}` -> " + " | ".join([f"Day {k}: ({len(v)})" for k,v in d.items()]) + "\n"
             await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_admin_keyboard())
@@ -350,7 +365,39 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Processing Admin Input States
         state = admin_states.get(user_id)
-        if state == 'await_new_prod_name':
+        
+        if state == 'await_broadcast_message':
+            admin_states[user_id] = None
+            success_count = 0
+            fail_count = 0
+            await update.message.reply_text(f"⏳ جاري النشر في القناة وبدء النشر الجماعي لـ {len(all_bot_users)} مستخدم...")
+            
+            # 1. النشر في القناة المربوطة تلقائياً
+            try:
+                await context.bot.send_message(chat_id=CHANNEL_ID, text=text)
+                channel_status = "✅ تم النشر في القناة بنجاح!"
+            except Exception as e:
+                channel_status = f"❌ فشل النشر في القناة (تأكد أن البوت آدمن ولديه صلاحية إرسال الرسائل). الخطأ: {e}"
+                
+            # 2. النشر لجميع مستخدمي البوت في الخاص
+            for u_id in list(all_bot_users):
+                try:
+                    await context.bot.send_message(chat_id=u_id, text=text)
+                    success_count += 1
+                except:
+                    fail_count += 1
+            
+            report_msg = (
+                f"📢 **تم انتهاء عملية الإذاعة الجماعية!**\n\n"
+                f"📺 **حالة القناة:**\n{channel_status}\n\n"
+                f"👥 **حالة المشتركين في الخاص:**\n"
+                f"✅ تم التسليم لـ: `{success_count}` مستخدم.\n"
+                f"❌ فشل الإرسال لـ: `{fail_count}` مستخدم (قاموا بحظر البوت)."
+            )
+            await update.message.reply_text(report_msg, parse_mode="Markdown", reply_markup=get_admin_keyboard())
+            return
+
+        elif state == 'await_new_prod_name':
             PRODUCTS[text] = {}
             fluorite_stock[text] = {}
             save_system_backup()
@@ -362,7 +409,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 u, p = text.split(":", 1)
                 APPROVED_ACCOUNTS[u.strip()] = p.strip()
                 save_system_backup()
-                await update.message.reply_text(f"✅ **تم إنشاء تصريح العميل بنجاح!**\n👤 الـ Login Key: `{u.strip()}`\n🔑 الـ Password: `{p.strip()}`\n\nيمكنك إعطائها له الآن لتفعيل حسابه.", parse_mode="Markdown", reply_markup=get_admin_keyboard())
+                await update.message.reply_text(f"✅ **تم إنشاء تصريح العميل بنجاح!**\n👤 الـ Login Key: `{u.strip()}`\n🔑 الـ Password: `{p.strip()}`", parse_mode="Markdown", reply_markup=get_admin_keyboard())
             else:
                 await update.message.reply_text("❌ صيغة خاطئة، لم يتم الإنشاء. يجب استخدام `loginkey:password`", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
@@ -386,7 +433,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text(f"✅ Price updated! **{p_name} ({p_days}D)** is now `{new_val}$`", reply_markup=get_admin_keyboard())
                 else:
                     await update.message.reply_text("❌ Error: Product not found.", reply_markup=get_admin_keyboard())
-            except: await update.message.reply_text("❌ Numerical digits only. Update failed.", reply_markup=get_admin_keyboard())
+            except: await update.message.reply_text("❌ Numerical digits only.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
 
         elif state == 'awaiting_custom_inject_price':
@@ -399,8 +446,8 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if p_name not in fluorite_stock: fluorite_stock[p_name] = {}
                 if p_days not in fluorite_stock[p_name]: fluorite_stock[p_name][p_days] = []
                 save_system_backup()
-                await update.message.reply_text(f"✅ Custom daily plan injected perfectly! **{p_name} ({p_days} Days)** configured to `{new_val}$`", reply_markup=get_admin_keyboard())
-            except: await update.message.reply_text("❌ Invalid price digits. Action cancelled.", reply_markup=get_admin_keyboard())
+                await update.message.reply_text(f"✅ Custom daily plan injected perfectly!", reply_markup=get_admin_keyboard())
+            except: await update.message.reply_text("❌ Invalid price digits.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
 
         elif state == 'await_coup':
@@ -417,13 +464,12 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p_name = context.user_data.get("adm_prod")
             p_days = context.user_data.get("adm_dur")
             input_keys = [line.strip() for line in text.split('\n') if line.strip()]
-            
             if p_name in fluorite_stock:
                 if p_days not in fluorite_stock[p_name]: fluorite_stock[p_name][p_days] = []
                 fluorite_stock[p_name][p_days].extend(input_keys)
                 save_system_backup()
-                await update.message.reply_text(f"✅ Loaded {len(input_keys)} keys to **{p_name} ({p_days} Days)** successfully!", reply_markup=get_admin_keyboard())
-            else: await update.message.reply_text("⚠️ Processing error, please try again.", reply_markup=get_admin_keyboard())
+                await update.message.reply_text(f"✅ Loaded {len(input_keys)} keys successfully!", reply_markup=get_admin_keyboard())
+            else: await update.message.reply_text("⚠️ Processing error.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
 
         elif state == 'await_del':
@@ -471,10 +517,9 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     elif text.startswith("💰 Wallet"):
         bal_str = format_price(user_balances.get(user_id, 0.0), sym, rate)
-        await update.message.reply_text(f"👤 **Your Account Status:**\n\n💵 Funds: `{bal_str}`\n🌐 Currency: `{sym}`\n👑 Support desk: {SUPPORT_USER}", parse_mode="Markdown")
+        await update.message.reply_text(f"👤 **Your Account Status:**\n\n💵 Funds: `{bal_str}`\n🌐 Currency: `{sym}`", parse_mode="Markdown")
         return
 
-    # Coupon Shifting System
     if user_states.get(user_id) == 'ent_coup':
         user_states[user_id] = None
         if text in active_coupons:
@@ -483,10 +528,9 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del active_coupons[text]
             save_system_backup()
             await update.message.reply_text(f"🎉 Sweet! +`{format_price(amt, sym, rate)}` added to your wallet!", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
-        else: await update.message.reply_text("❌ Code is incorrect or already used.", reply_markup=get_user_keyboard(user_id))
+        else: await update.message.reply_text("❌ Code is incorrect.", reply_markup=get_user_keyboard(user_id))
         return
 
-    # User Checkout Confirmation
     if user_states.get(user_id) == "awaiting_checkout_confirm":
         user_states[user_id] = None
         if text.lower() == "ok":
@@ -496,23 +540,26 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if user_balances.get(user_id, 0.0) >= price:
                 if fluorite_stock.get(p_name, {}).get(p_days):
-                    key = fluorite_stock[p_name][p_days].pop(0)
+                    raw_key = fluorite_stock[p_name][p_days].pop(0)
                     user_balances[user_id] -= price
                     save_system_backup()
-                    await update.message.reply_text(f"🎉 **Awesome! Purchase successful:**\n\n`{key}`\n\nHave fun using it! ✨", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
+                    
+                    # إخفاء منتصف الأكواد الحقيقية والوهمية لحماية الخصوصية ومنع النسخ العشوائي والتأكد
+                    masked_output = mask_credential(raw_key)
+                    
+                    await update.message.reply_text(f"🎉 **Awesome! Purchase successful:**\n\n`{masked_output}`\n\nHave fun using it! ✨", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
                 else: await update.message.reply_text(f"⚠️ Oh no! We are out of stock. Please ask {SUPPORT_USER}", reply_markup=get_user_keyboard(user_id))
-            else: await update.message.reply_text(f"❌ Your balance is not enough. You need {format_price(price, sym, rate)} to buy this item.", reply_markup=get_user_keyboard(user_id))
+            else: await update.message.reply_text(f"❌ Your balance is not enough.", reply_markup=get_user_keyboard(user_id))
         else:
-            await update.message.reply_text("❌ **Order cancelled.** Feel free to explore again whenever you like!", reply_markup=get_user_keyboard(user_id))
+            await update.message.reply_text("❌ **Order cancelled.**", reply_markup=get_user_keyboard(user_id))
         return
 
-    # Backup Restoration File Catcher (Admin)
     if update.message.document and user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
         if update.message.document.file_name == BACKUP_FILE:
             file_obj = await context.bot.get_file(update.message.document.file_id)
             await file_obj.download_to_drive(custom_path=BACKUP_FILE)
             load_system_backup()
-            await update.message.reply_text("⚡ **Database file recovered and synced perfectly!**", reply_markup=get_admin_keyboard())
+            await update.message.reply_text("⚡ **Database file recovered!**", reply_markup=get_admin_keyboard())
             return
 
     if user_balances.get(user_id, 0.0) == 0 and user_id not in ADMIN_LIST:
@@ -529,14 +576,14 @@ async def handling_inject_callbacks(update: Update, context: ContextTypes.DEFAUL
     if data == "adm_add_custom_day":
         if user_id not in ADMIN_LIST: return
         admin_states[user_id] = "awaiting_custom_day_name"
-        await query.edit_message_text("⏱️ Send the number of days for the new standalone custom plan (e.g., `20`):")
+        await query.edit_message_text("⏱️ Send the number of days for the new custom plan:")
         return
         
     if data.startswith("inject_day_to_"):
         prod_target = data.replace("inject_day_to_", "")
         context.user_data["adm_prod"] = prod_target
         admin_states[user_id] = "awaiting_custom_inject_price"
-        await query.edit_message_text(f"💵 Perfect! Now send the **Price in USD ($)** for this new custom plan under `{prod_target}`:")
+        await query.edit_message_text(f"💵 Perfect! Now send the **Price in USD ($)**:")
         return
 
 if __name__ == '__main__':
