@@ -95,7 +95,7 @@ def get_user_currency_info(user_id):
 def format_price(usd_amount, symbol, rate):
     return f"{usd_amount * rate:.1f} $" if symbol == "$" else f"{usd_amount * rate:.1f} {symbol}"
 
-# --- Keyboards (Converted to Reply Keyboards) ---
+# --- Keyboards ---
 def get_admin_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("➕ Add Product"), KeyboardButton("❌ Delete Product")],
@@ -107,13 +107,18 @@ def get_admin_keyboard():
         [KeyboardButton("👤 View as User")]
     ], resize_keyboard=True)
 
-def get_user_keyboard():
-    # الأزرار مطابقة للصورة تماماً
-    return ReplyKeyboardMarkup([
+def get_user_keyboard(is_admin=False):
+    # الأزرار مطابقة للصورة الأساسية للمستخدم العادي
+    keyboard = [
         [KeyboardButton("Buy Key 🔑")],
         [KeyboardButton("Support 🗣️"), KeyboardButton("🚪 Log out 🚪")],
         [KeyboardButton("➡️ Next")]
-    ], resize_keyboard=True)
+    ]
+    # إضافة زر العودة للآدمن في حال كان المستخدم آدمن فقط
+    if is_admin:
+        keyboard.append([KeyboardButton("🔙 Admin Panel")])
+        
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def get_user_keyboard_page2():
     return ReplyKeyboardMarkup([
@@ -146,12 +151,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_user_welcome(update, user_id)
 
 async def show_user_welcome(update: Update, user_id: int):
-    # النص مطابق للصورة (بدون خط عريض)
+    # النص مطابق للصورة
     msg = "✅ Access Granted! Logged in successfully.\nWelcome to your User Dashboard."
+    is_admin = user_id in ADMIN_LIST
+    
     if update.message:
-        await update.message.reply_text(msg, reply_markup=get_user_keyboard())
+        await update.message.reply_text(msg, reply_markup=get_user_keyboard(is_admin))
     elif update.callback_query:
-        await update.callback_query.message.reply_text(msg, reply_markup=get_user_keyboard())
+        await update.callback_query.message.reply_text(msg, reply_markup=get_user_keyboard(is_admin))
 
 # --- Inline Callback Hub (For Shop only) ---
 async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -455,6 +462,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: await update.message.reply_text("Invalid ID.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
 
+    # زر الرجوع الخاص بالإدارة عندما يكون في وضع عرض المستخدم
     if user_id in ADMIN_LIST and text == "🔙 Admin Panel":
         admin_view_mode[user_id] = 'admin'
         await update.message.reply_text("👑 Welcome back to the Management Room.", reply_markup=get_admin_keyboard())
@@ -463,7 +471,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- User Frontend Text Inputs (Reply Keyboards Logic) ---
     sym, rate = get_user_currency_info(user_id)
 
-    # تم تغيير الإيموجيات والنصوص هنا لتطابق الأزرار تماماً
     if text == "Buy Key 🔑":
         buttons = [[InlineKeyboardButton(f"📦 {prod}", callback_data=f"shop_prod_{prod}")] for prod in PRODUCTS.keys()]
         await update.message.reply_text("🛒 **Welcome to our Shop!**\n\nChoose the product you want to buy:", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
@@ -478,8 +485,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id in authenticated_users:
             authenticated_users.remove(user_id)
         user_states[user_id] = "awaiting_login_credentials"
-        
-        # النص مطابق للصورة (بدون Markdown backticks)
         welcome_login_msg = "You have been logged out.\nPlease send your credentials in the following format:\n\nLOGIN\nPASSWORD"
         await update.message.reply_text(welcome_login_msg, reply_markup=ReplyKeyboardRemove())
         return
