@@ -110,8 +110,8 @@ def get_admin_keyboard():
 def get_user_keyboard():
     # ترتيب الأزرار كما طلبت في الصورة
     return ReplyKeyboardMarkup([
-        [KeyboardButton("🩷 Buy Key 🩷")],
-        [KeyboardButton("💙 Support 💙"), KeyboardButton("🚪 Log out 🚪")],
+        [KeyboardButton(" Buy Key 🔑")],
+        [KeyboardButton(" Support 🗣️"), KeyboardButton("🚪 Log out 🚪")],
         [KeyboardButton("➡️ Next")]
     ], resize_keyboard=True)
 
