@@ -8,12 +8,14 @@ import os
 # --- Configurations ---
 TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
 PRIMARY_ADMIN = 5145154527
-SECONDARY_ADMIN = 8300889547  # المسؤول الدائم الآخر
+SECONDARY_ADMIN = 8300889547  
 SUPPORT_USER = "@i6issiiiii"
 BACKUP_FILE = "fluorite_backup.json"
 
-# --- Database ---
+# --- Database & Variables ---
 ADMIN_LIST = {PRIMARY_ADMIN, SECONDARY_ADMIN}
+MAINTENANCE_MODE = False  # وضع الصيانة الافتراضي (تعطيل = False / تفعيل = True)
+
 PRODUCTS = {
     "Fluorite Hack 💎": {"1": 5.0, "7": 15.0, "30": 40.0},
     "Drip Hack 💧": {"1": 4.0, "7": 12.0, "30": 35.0}
@@ -31,13 +33,14 @@ fluorite_stock = {
 def save_system_backup():
     backup_data = {
         "admins": list(ADMIN_LIST), "balances": user_balances, "currencies": user_currencies,
-        "countries": user_countries, "coupons": active_coupons, "stock": fluorite_stock, "products": PRODUCTS
+        "countries": user_countries, "coupons": active_coupons, "stock": fluorite_stock, 
+        "products": PRODUCTS, "maintenance": MAINTENANCE_MODE
     }
     with open(BACKUP_FILE, "w", encoding="utf-8") as f:
         json.dump(backup_data, f, ensure_ascii=False, indent=4)
 
 def load_system_backup():
-    global ADMIN_LIST, user_balances, user_currencies, user_countries, active_coupons, fluorite_stock, PRODUCTS
+    global ADMIN_LIST, user_balances, user_currencies, user_countries, active_coupons, fluorite_stock, PRODUCTS, MAINTENANCE_MODE
     if os.path.exists(BACKUP_FILE):
         try:
             with open(BACKUP_FILE, "r", encoding="utf-8") as f:
@@ -50,6 +53,7 @@ def load_system_backup():
                 active_coupons = data.get("coupons", {})
                 fluorite_stock = data.get("stock", {})
                 PRODUCTS = data.get("products", PRODUCTS)
+                MAINTENANCE_MODE = data.get("maintenance", False)
         except Exception as e: print(f"Backup load failed: {e}")
 
 load_system_backup()
@@ -74,12 +78,14 @@ def format_price(usd_amount, symbol, rate):
 
 # --- Keyboards ---
 def get_admin_keyboard():
+    m_label = "🔴 Maintenance: ON" if MAINTENANCE_MODE else "🟢 Maintenance: OFF"
     return ReplyKeyboardMarkup([
         [KeyboardButton("➕ Add Product"), KeyboardButton("❌ Delete Product")],
         [KeyboardButton("🎫 Mint Coupon"), KeyboardButton("📦 Add Keys")],
         [KeyboardButton("⚙️ Edit Prices"), KeyboardButton("🗑️ Delete Key")],
         [KeyboardButton("👥 Add Admin"), KeyboardButton("📊 Statistics")],
-        [KeyboardButton("💾 Save Backup"), KeyboardButton("👤 View as User")]
+        [KeyboardButton(m_label), KeyboardButton("💾 Save Backup")],
+        [KeyboardButton("👤 View as User")]
     ], resize_keyboard=True)
 
 def get_user_keyboard(user_id):
@@ -93,10 +99,22 @@ def get_user_keyboard(user_id):
         keyboard.insert(0, [KeyboardButton("🔙 Admin Panel")])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# --- Start ---
+# --- Start Command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     admin_states[user_id] = user_states[user_id] = None
+    
+    # حظر المستخدمين العاديين إذا كان وضع الصيانة مفعل
+    if MAINTENANCE_MODE and user_id not in ADMIN_LIST:
+        maintenance_msg = (
+            "🛠️ **| سـرورنا تـحت الـتطويـر والـتحديث!**\n\n"
+            "مرحباً بك عزيزي العميل، نحن نقوم حالياً بإضافة باقات منتجات حصرية وتحديثات أمنية خارقة لضمان أفضل تجربة لك. ✨\n\n"
+            "⏳ **نعـود إليكم أقـوى قـريـباً جـداً!**\n"
+            f"👑 للدعم الفني السريع والاستفسارات: {SUPPORT_USER}"
+        )
+        await update.message.reply_text(maintenance_msg, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+        return
+
     if user_id not in user_balances: user_balances[user_id] = 0.0
     if user_id not in user_countries: user_countries[user_id] = random.choice(["SA", "EG", "AE", "DZ", "IQ"])
 
@@ -121,19 +139,22 @@ async def show_user_welcome(update: Update, user_id: int):
     )
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
 
-# --- Simple Inline Clicks Hub (The Transparent Elegant Panels) ---
+# --- Inline Callback Hub (Transparent Elegant Windows) ---
 async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     data = query.data
 
+    # منع استخدام الأزرار في وضع الصيانة لغير الآدمنز
+    if MAINTENANCE_MODE and user_id not in ADMIN_LIST:
+        return
+
     # User Clicking Main Shop Products
     if data.startswith("shop_prod_"):
         prod = data.replace("shop_prod_", "")
         sym, rate = get_user_currency_info(user_id)
         
-        # عرض المدد المتاحة لهذا المنتج داخل أزرار شفافة مخصصة له
         buttons = []
         for d, price in PRODUCTS[prod].items():
             price_str = format_price(price, sym, rate)
@@ -144,12 +165,11 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if data == "reload_shop":
-        # إعادة عرض المنتجات الرئيسية
         buttons = [[InlineKeyboardButton(f"📦 {prod}", callback_data=f"shop_prod_{prod}")] for prod in PRODUCTS.keys()]
         await query.edit_message_text("🛒 **Welcome to our Shop!**\n\nSelect a product category to view plans:", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # User Order Buying Check out
+    # User Order Buying Checkout
     if data.startswith("buy_"):
         parts = data.split("_")
         selected_prod = parts[1]
@@ -187,19 +207,22 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(f"📝 **Almost done!**\nNow send the keys/codes (You can paste one or multiple lines):")
         return
 
-    # Admin: Step-by-Step Price Customization (Transparent elegant fields like image_2.png)
+    # Admin: Modifying Rates or Day Separation
     if data.startswith("adm_prc_"):
         prod = data.replace("adm_prc_", "")
         context.user_data["adm_prod"] = prod
+        
+        # عرض خطط الأسعار الحالية أولاً
         buttons = [[InlineKeyboardButton(f"⚙️ Edit {d} Day Price", callback_data=f"adm_p_dur_{d}")] for d in PRODUCTS[prod].keys()]
-        # زر إضافي لإدخال مدة جديدة يدوياً تماماً كطلبك (مثال 20 يوم)
+        # إضافة الزر المخصص لإضافة مدة جديدة لوحده تماماً بالأسفل بشكل أنيق جداً
         buttons.append([InlineKeyboardButton("➕ Add New Custom Day Plan", callback_data="adm_add_custom_day")])
-        await query.edit_message_text(f"⚙️ Modifying rates for **{prod}**\nSelect plan duration:", reply_markup=InlineKeyboardMarkup(buttons))
+        
+        await query.edit_message_text(f"⚙️ Modifying rates for **{prod}**\nSelect plan duration or inject a new plan:", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
     if data == "adm_add_custom_day":
         admin_states[user_id] = "awaiting_custom_day_name"
-        await query.edit_message_text("⏱️ Send the number of days for the new plan (e.g., `20`):")
+        await query.edit_message_text("⏱️ Send the number of days for the new custom plan (e.g., `20`):")
         return
 
     if data.startswith("adm_p_dur_"):
@@ -223,13 +246,24 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
+    # حظر الرسائل والنصوص تماماً للمستخدمين العاديين إذا كانت الصيانة مفعلة
+    if MAINTENANCE_MODE and user_id not in ADMIN_LIST:
+        maintenance_msg = (
+            "🛠️ **| سـرورنا تـحت الـتطويـر والـتحديث!**\n\n"
+            "مرحباً بك عزيزي العميل، نحن نقوم حالياً بإضافة باقات منتجات حصرية وتحديثات أمنية خارقة لضمان أفضل تجربة لك. ✨\n\n"
+            "⏳ **نعـود إليكم أقـوى قـريـباً جـداً!**\n"
+            f"👑 للدعم الفني السريع والاستفسارات: {SUPPORT_USER}"
+        )
+        await update.message.reply_text(maintenance_msg, parse_mode="Markdown")
+        return
+
     if text in ["🟢 My Currency", "💵 USD ($)"]:
         user_currencies[user_id] = "LOCAL" if "My" in text else "USD"
         save_system_backup()
         await show_user_welcome(update, user_id)
         return
 
-    # --- Admin Interactive Panel ---
+    # --- Admin Backend Workspace ---
     if user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
         if text == "➕ Add Product":
             admin_states[user_id] = 'await_new_prod_name'
@@ -239,6 +273,14 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif text == "❌ Delete Product":
             buttons = [[InlineKeyboardButton(f"🗑️ Delete {prod}", callback_data=f"adm_del_p_{prod}")] for prod in PRODUCTS.keys()]
             await update.message.reply_text("⚠️ **Select product to delete permanently:**", reply_markup=InlineKeyboardMarkup(buttons))
+            return
+
+        elif text in ["🔴 Maintenance: ON", "🟢 Maintenance: OFF"]:
+            global MAINTENANCE_MODE
+            MAINTENANCE_MODE = not MAINTENANCE_MODE
+            save_system_backup()
+            status_txt = "🔴 [ACTIVE]" if MAINTENANCE_MODE else "🟢 [DEACTIVATED]"
+            await update.message.reply_text(f"🛠️ **Maintenance Mode Status updated:** {status_txt}", reply_markup=get_admin_keyboard())
             return
 
         elif text == "🎫 Mint Coupon":
@@ -253,7 +295,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif text == "⚙️ Edit Prices":
             buttons = [[InlineKeyboardButton(prod, callback_data=f"adm_prc_{prod}")] for prod in PRODUCTS.keys()]
-            await update.message.reply_text("⚙️ **Select product to adjust price:**", reply_markup=InlineKeyboardMarkup(buttons))
+            await update.message.reply_text("⚙️ **Select product to adjust price or add standalone custom plans:**", reply_markup=InlineKeyboardMarkup(buttons))
             return
 
         elif text == "🗑️ Delete Key":
@@ -280,7 +322,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔄 Switched to User View simulation.", reply_markup=get_user_keyboard(user_id))
             return
 
-        # Processing States
+        # Processing Admin Input States
         state = admin_states.get(user_id)
         if state == 'await_new_prod_name':
             PRODUCTS[text] = {}
@@ -361,7 +403,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     elif text == "🛒 Shop":
-        # عرض المنتجات الأساسية كخانات شفافة أنيقة وعصرية جداً داخل الشات
         buttons = [[InlineKeyboardButton(f"📦 {prod}", callback_data=f"shop_prod_{prod}")] for prod in PRODUCTS.keys()]
         await update.message.reply_text("🛒 **Welcome to our Shop!**\n\nSelect a product category to view plans:", reply_markup=InlineKeyboardMarkup(buttons))
         return
@@ -380,7 +421,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"👤 **Your Account Status:**\n\n💵 Funds: `{bal_str}`\n🌐 Currency: `{sym}`\n👑 Support desk: {SUPPORT_USER}", parse_mode="Markdown")
         return
 
-    # Coupon shifting
+    # Coupon Shifting System
     if user_states.get(user_id) == 'ent_coup':
         user_states[user_id] = None
         if text in active_coupons:
@@ -412,7 +453,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ **Order cancelled.** Feel free to explore again whenever you like!", reply_markup=get_user_keyboard(user_id))
         return
 
-    # Admin DB restoration file catcher
+    # Backup Restoration File Catcher (Admin)
     if update.message.document and user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
         if update.message.document.file_name == BACKUP_FILE:
             file_obj = await context.bot.get_file(update.message.document.file_id)
@@ -430,5 +471,5 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CallbackQueryHandler(shop_menu_callback))
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_messages))
-    print("🏪 Fully Transparent Elegant Store running perfectly...")
+    print("🏪 Advanced Transparent Store with Maintenance Running...")
     application.run_polling()
