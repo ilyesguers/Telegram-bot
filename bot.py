@@ -1,7 +1,6 @@
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telethon import TelegramClient, events
-from telegram.ext import Application
 import random
 import string
 import json
@@ -102,7 +101,7 @@ def get_user_currency_info(user_id):
 def format_price(usd_amount, symbol, rate):
     return f"{usd_amount * rate:.1f} $" if symbol == "$" else f"{usd_amount * rate:.1f} {symbol}"
 
-# --- NEW Keyboards (Renamed to break old cache) ---
+# --- NEW Keyboards ---
 def get_admin_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("➕ Add New Product"), KeyboardButton("❌ Remove Product")],
@@ -167,10 +166,9 @@ async def show_user_welcome(update: Update, user_id: int):
         f"Enjoy our specially discounted prices below.\n"
         f"👑 **Support Desk:** {SUPPORT_USER} ✨"
     )
-    # The new keyboard will overwrite the old stuck ones!
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
 
-# --- Fluorite Reset Command ---
+# --- Fluorite Reset Command (FREE) ---
 async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in authenticated_users and user_id not in ADMIN_LIST: return
@@ -184,7 +182,7 @@ async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await client.send_message(TARGET_BOT, f"/fluorite {code}")
     pending_requests[user_id] = {"type": "fluorite"}
-    await update.message.reply_text("⏳ **Reset request sent!** Waiting for response...", parse_mode="Markdown")
+    await update.message.reply_text("⏳ **Reset request sent! (مجاني 💸)** Waiting for response...", parse_mode="Markdown")
 
 # --- Inline Callback Hub ---
 async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -276,7 +274,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip() if update.message.text else ""
     all_bot_users.add(user_id)
 
-    # Document Handling (For File Check & Backup Restore)
+    # Document Handling
     if update.message.document:
         if user_states.get(user_id) == "awaiting_drip_file":
             user_states[user_id] = None
@@ -332,7 +330,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_user_welcome(update, user_id)
         return
 
-    # --- Admin Backend Workspace (Exact Matches to New Names) ---
+    # --- Admin Backend Workspace ---
     if user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
         if text == "➕ Add New Product":
             admin_states[user_id] = 'await_new_prod_name'
@@ -545,7 +543,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"👤 **Your Account Status:**\n\n💵 Funds: `{bal_str}`\n🌐 Currency: `{sym}`", parse_mode="Markdown")
         return
         
-    # --- Reset Features Handling ---
+    # --- Reset Features Handling (FREE) ---
     elif text == "🔄 Reset Drip Key":
         user_states[user_id] = "awaiting_drip_code"
         await update.message.reply_text("📝 **Please send your 10-digit DRIP code:**", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
@@ -565,7 +563,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not client.is_connected(): await client.connect()
         await client.send_message(DRIP_RESET_BOT, text)
         pending_requests[user_id] = {"type": "drip"}
-        await update.message.reply_text("⏳ **DRIP code sent!** Waiting for response...", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
+        await update.message.reply_text("⏳ **DRIP code sent! (مجاني 💸)** Waiting for response...", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
         return
 
     if user_states.get(user_id) == 'ent_coup':
