@@ -1,27 +1,33 @@
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telethon import TelegramClient, events
 import random
 import string
 import json
 import os
+import asyncio
 
 # --- Configurations ---
 TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
 PRIMARY_ADMIN = 5145154527
 SECONDARY_ADMIN = 8300889547  
 SUPPORT_USER = "@i6issiiiii"
-CHANNEL_ID = "@TQA_CHANNEL"  # معرف قناتك (SISI MODE) المربوطة بالبوت
+CHANNEL_ID = "@TQA_CHANNEL"  
+
+# --- Telethon Configurations ---
+API_ID = 26481531
+API_HASH = '8d8ea2b8bde9b22bb7f4b6de905bd3f7'
+TARGET_BOT = '@FlouriteReseller_bot'
+DRIP_RESET_BOT = '@ResetDrip_bot'
+
+client = TelegramClient('bot_session', API_ID, API_HASH)
+pending_requests = {}
+
 BACKUP_FILE = "fluorite_backup.json"
 
 # --- Database & Variables ---
 ADMIN_LIST = {PRIMARY_ADMIN, SECONDARY_ADMIN}
-
-# قاعدة بيانات الحسابات المسموح لها بالدخول
-APPROVED_ACCOUNTS = {
-    "demo_key": "pass123" 
-}
-
-# لتتبع مستخدمي البوت
+APPROVED_ACCOUNTS = {"demo_key": "pass123"}
 all_bot_users = set()
 authenticated_users = set()
 
@@ -29,19 +35,15 @@ PRODUCTS = {
     "Fluorite Hack 💎": {"1": 5.0, "7": 15.0, "30": 40.0},
     "Drip Hack 💧": {"1": 4.0, "7": 12.0, "30": 35.0}
 }
-user_balances = {}    
-user_currencies = {}  
-user_countries = {}   
+user_balances, user_currencies, user_countries = {}, {}, {}
 active_coupons = {"CHARGE-10USD": 10.0, "CHARGE-50USD": 50.0}
 fluorite_stock = {
     "Fluorite Hack 💎": {"1": ["FLUORITE-1DAY-XXXX"], "7": ["FLUORITE-7DAY-ZZZZ"], "30": ["FLUORITE-30DAY-AAAA"]},
     "Drip Hack 💧": {"1": ["DRIP-1DAY-1111"], "7": ["DRIP-7DAY-2222"], "30": ["DRIP-30DAY-3333"]}
 }
 
-# دالة إخفاء منتصف الأكواد للتسويق الوهمي أو الحقيقي لحمايتها من النسخ
 def mask_credential(text):
-    if not text:
-        return ""
+    if not text: return ""
     if ":" in text:
         parts = text.split(":", 1)
         return f"{mask_string(parts[0])}:{mask_string(parts[1])}"
@@ -49,11 +51,9 @@ def mask_credential(text):
 
 def mask_string(s):
     s_len = len(s)
-    if s_len <= 6:
-        return s[0] + "****" + s[-1] if s_len > 1 else "****"
+    if s_len <= 6: return s[0] + "****" + s[-1] if s_len > 1 else "****"
     return s[:4] + "*" * (s_len - 8) + s[-4:]
 
-# دالة توليد كود عشوائي تماماً من 16 رمزاً مثل صيغة صورة العميل
 def generate_random_16_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))
 
@@ -73,8 +73,7 @@ def load_system_backup():
         try:
             with open(BACKUP_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                saved_admins = data.get("admins", [])
-                ADMIN_LIST = set(saved_admins) | {PRIMARY_ADMIN, SECONDARY_ADMIN}
+                ADMIN_LIST = set(data.get("admins", [])) | {PRIMARY_ADMIN, SECONDARY_ADMIN}
                 user_balances = {int(k): v for k, v in data.get("balances", {}).items()}
                 user_currencies = {int(k): v for k, v in data.get("currencies", {}).items()}
                 user_countries = {int(k): v for k, v in data.get("countries", {}).items()}
@@ -88,12 +87,9 @@ def load_system_backup():
 load_system_backup()
 
 EXCHANGE_RATES = {
-    "SA": {"symbol": "SAR", "rate": 3.75},
-    "EG": {"symbol": "EGP", "rate": 47.0},
-    "AE": {"symbol": "AED", "rate": 3.67},
-    "DZ": {"symbol": "DZD", "rate": 134.0},
-    "IQ": {"symbol": "IQD", "rate": 1310.0},
-    "DEFAULT": {"symbol": "$", "rate": 1.0}
+    "SA": {"symbol": "SAR", "rate": 3.75}, "EG": {"symbol": "EGP", "rate": 47.0},
+    "AE": {"symbol": "AED", "rate": 3.67}, "DZ": {"symbol": "DZD", "rate": 134.0},
+    "IQ": {"symbol": "IQD", "rate": 1310.0}, "DEFAULT": {"symbol": "$", "rate": 1.0}
 }
 
 admin_states, user_states, admin_view_mode = {}, {}, {}
@@ -105,27 +101,28 @@ def get_user_currency_info(user_id):
 def format_price(usd_amount, symbol, rate):
     return f"{usd_amount * rate:.1f} $" if symbol == "$" else f"{usd_amount * rate:.1f} {symbol}"
 
-# --- Keyboards ---
+# --- NEW Keyboards (Renamed to break old cache) ---
 def get_admin_keyboard():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("➕ Add Product"), KeyboardButton("❌ Delete Product")],
-        [KeyboardButton("🎫 Mint Coupon"), KeyboardButton("📦 Add Keys")],
-        [KeyboardButton("⚙️ Edit Prices"), KeyboardButton("🗑️ Delete Key")],
-        [KeyboardButton("👥 Add Admin"), KeyboardButton("👤 Create Login Pass")],
-        [KeyboardButton("📢 Broadcast"), KeyboardButton("🪄 Fake Sale Promo")],
-        [KeyboardButton("📊 Statistics"), KeyboardButton("💾 Save Backup")],
-        [KeyboardButton("👤 View as User")]
+        [KeyboardButton("➕ Add New Product"), KeyboardButton("❌ Remove Product")],
+        [KeyboardButton("🎫 Create Coupon"), KeyboardButton("📦 Load Keys")],
+        [KeyboardButton("⚙️ Modify Prices"), KeyboardButton("🗑️ Erase Key")],
+        [KeyboardButton("👥 Manage Admins"), KeyboardButton("👤 New Login Pass")],
+        [KeyboardButton("📢 Send Broadcast"), KeyboardButton("🪄 Trigger Fake Sale")],
+        [KeyboardButton("📊 System Stats"), KeyboardButton("💾 Manual Backup")],
+        [KeyboardButton("👤 Enter User Mode")]
     ], resize_keyboard=True)
 
 def get_user_keyboard(user_id):
     bal_str = format_price(user_balances.get(user_id, 0.0), *get_user_currency_info(user_id))
     keyboard = [
-        [KeyboardButton("🛒 Shop"), KeyboardButton("💳 Add Funds")],
-        [KeyboardButton(f"💰 Wallet [{bal_str}]"), KeyboardButton("💱 Currency")],
-        [KeyboardButton("💬 Support")]
+        [KeyboardButton("🛒 Wholesale Shop"), KeyboardButton("💳 Top-up Balance")],
+        [KeyboardButton(f"💰 My Wallet [{bal_str}]"), KeyboardButton("💱 Switch Currency")],
+        [KeyboardButton("🔄 Reset Drip Key"), KeyboardButton("📁 Drip File Check")],
+        [KeyboardButton("💬 Live Support")]
     ]
     if user_id in ADMIN_LIST:
-        keyboard.insert(0, [KeyboardButton("🔙 Admin Panel")])
+        keyboard.insert(0, [KeyboardButton("🔙 Return to Admin")])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # --- Start Command ---
@@ -143,17 +140,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_id not in authenticated_users and user_id not in ADMIN_LIST:
         user_states[user_id] = "awaiting_login_credentials"
-        
         welcome_secure_msg = (
             "🔒 **مرحباً بك في متجر الجملة السري والحصري!**\n"
             "✨ *هذا البوت محمي ومخصص للأعضاء المصرح لهم فقط بأسعار رخيصة جداً.*\n\n"
             "💬 **الرجاء إرسال تفاصيل الدخول الخاصة بك بالصيغة التالية:**\n"
             "👉 `loginkey:password`\n\n"
-            "⚙️ **🔐 PRIVATE STORE GATEWAY**\n"
-            "This bot is fully locked and restricted to wholesale members only. Please submit your access credentials in the exact format below:\n"
-            "👉 `loginkey:password`\n\n"
-            f"👑 **للحصول على تصريح الدخول الخاص بك والبدء بالشراء بأرخص الأسعار، تواصل معنا فوراً:**\n"
-            f"👑 **To get your private access pass and start shopping at the lowest rates, contact support:**\n"
+            f"👑 **To get your private access pass, contact support:**\n"
             f"➡️ **Contact Admin:** {SUPPORT_USER} ✨"
         )
         await update.message.reply_text(welcome_secure_msg, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
@@ -171,10 +163,27 @@ async def show_user_welcome(update: Update, user_id: int):
     msg = (
         f"👋 **Access Granted! Welcome to our wholesale store!** ✨\n\n"
         f"💳 **Your Balance:** `{bal_str}`\n\n"
-        f"Enjoy our specially discounted prices below. For balance top-up, use the tools:\n"
+        f"Enjoy our specially discounted prices below.\n"
         f"👑 **Support Desk:** {SUPPORT_USER} ✨"
     )
+    # The new keyboard will overwrite the old stuck ones!
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
+
+# --- Fluorite Reset Command ---
+async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in authenticated_users and user_id not in ADMIN_LIST: return
+    
+    if not context.args:
+        await update.message.reply_text("❌ **Please provide the 16-character code.**\nExample: `/reset ABCDEFGHIJKLMNOP`", parse_mode="Markdown")
+        return
+        
+    code = context.args[0].strip()
+    if not client.is_connected(): await client.connect()
+    
+    await client.send_message(TARGET_BOT, f"/fluorite {code}")
+    pending_requests[user_id] = {"type": "fluorite"}
+    await update.message.reply_text("⏳ **Reset request sent!** Waiting for response...", parse_mode="Markdown")
 
 # --- Inline Callback Hub ---
 async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -183,13 +192,11 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     data = query.data
 
-    if user_id not in authenticated_users and user_id not in ADMIN_LIST:
-        return
+    if user_id not in authenticated_users and user_id not in ADMIN_LIST: return
 
     if data.startswith("shop_prod_"):
         prod = data.replace("shop_prod_", "")
         sym, rate = get_user_currency_info(user_id)
-        
         buttons = []
         if prod in PRODUCTS:
             for d, price in PRODUCTS[prod].items():
@@ -268,18 +275,40 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip() if update.message.text else ""
     all_bot_users.add(user_id)
 
+    # Document Handling (For File Check & Backup Restore)
+    if update.message.document:
+        if user_states.get(user_id) == "awaiting_drip_file":
+            user_states[user_id] = None
+            file = await context.bot.get_file(update.message.document.file_id)
+            path = f"temp_{update.message.document.file_name}"
+            await file.download_to_drive(path)
+            
+            if not client.is_connected(): await client.connect()
+            await client.send_file(DRIP_RESET_BOT, path)
+            os.remove(path)
+            
+            pending_requests[user_id] = {"type": "drip"}
+            await update.message.reply_text("⏳ **File sent!** Waiting for check results...", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
+            return
+            
+        elif user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
+            if update.message.document.file_name == BACKUP_FILE:
+                file_obj = await context.bot.get_file(update.message.document.file_id)
+                await file_obj.download_to_drive(custom_path=BACKUP_FILE)
+                load_system_backup()
+                await update.message.reply_text("⚡ **Database file recovered!**", reply_markup=get_admin_keyboard())
+                return
+        return
+
+    # Authentication Handling
     if user_id not in authenticated_users and user_id not in ADMIN_LIST:
         if user_states.get(user_id) == "awaiting_login_credentials":
             if ":" in text:
                 input_key, input_pass = text.split(":", 1)
-                input_key = input_key.strip()
-                input_pass = input_pass.strip()
-                
-                if APPROVED_ACCOUNTS.get(input_key) == input_pass:
+                if APPROVED_ACCOUNTS.get(input_key.strip()) == input_pass.strip():
                     authenticated_users.add(user_id)
                     user_states[user_id] = None
                     await update.message.reply_text("🎉 **Access Granted / تم تفعيل دخولك بنجاح!**")
-                    
                     if user_id not in user_currencies:
                         sym = EXCHANGE_RATES.get(user_countries[user_id], EXCHANGE_RATES["DEFAULT"])["symbol"]
                         await update.message.reply_text(f"🌍 **Currency Choice**\n\nDo you want to see prices in your **Local Currency ({sym})** or **USD ($)**?", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🟢 My Currency"), KeyboardButton("💵 USD ($)")]], resize_keyboard=True))
@@ -302,71 +331,62 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_user_welcome(update, user_id)
         return
 
-    # --- Admin Backend Workspace ---
+    # --- Admin Backend Workspace (Exact Matches to New Names) ---
     if user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
-        if text == "➕ Add Product":
+        if text == "➕ Add New Product":
             admin_states[user_id] = 'await_new_prod_name'
             await update.message.reply_text("📝 Enter the name of the new product/cheat to add:", reply_markup=ReplyKeyboardRemove())
             return
-
-        elif text == "❌ Delete Product":
+        elif text == "❌ Remove Product":
             buttons = [[InlineKeyboardButton(f"🗑️ Delete {prod}", callback_data=f"adm_del_p_{prod}")] for prod in PRODUCTS.keys()]
             await update.message.reply_text("⚠️ **Select product to delete permanently:**", reply_markup=InlineKeyboardMarkup(buttons))
             return
-
-        elif text == "🎫 Mint Coupon":
+        elif text == "🎫 Create Coupon":
             admin_states[user_id] = 'await_coup'
             await update.message.reply_text("💵 Enter coupon value in USD (numbers only):", reply_markup=ReplyKeyboardRemove())
             return
-
-        elif text == "📦 Add Keys":
+        elif text == "📦 Load Keys":
             buttons = [[InlineKeyboardButton(prod, callback_data=f"adm_add_{prod}")] for prod in PRODUCTS.keys()]
             await update.message.reply_text("📦 **Select target product to load stock:**", reply_markup=InlineKeyboardMarkup(buttons))
             return
-
-        elif text == "⚙️ Edit Prices":
+        elif text == "⚙️ Modify Prices":
             buttons = [[InlineKeyboardButton(prod, callback_data=f"adm_prc_{prod}")] for prod in PRODUCTS.keys()]
             admin_markup = InlineKeyboardMarkup(buttons)
             await update.message.reply_text("⚙️ **Select a product to edit its current plan prices:**", reply_markup=admin_markup)
-            
             custom_plan_btn = [[InlineKeyboardButton("➕ Add New Custom Daily Plan", callback_data="adm_add_custom_day")]]
             await update.message.reply_text("✨ **Or add a completely new standalone plan to any product:**", reply_markup=InlineKeyboardMarkup(custom_plan_btn))
             return
-
-        elif text == "🗑️ Delete Key":
+        elif text == "🗑️ Erase Key":
             admin_states[user_id] = 'await_del'
             await update.message.reply_text("Paste the code you want to remove from stock:", reply_markup=ReplyKeyboardRemove())
             return
-        elif text == "👥 Add Admin":
+        elif text == "👥 Manage Admins":
             admin_states[user_id] = 'await_adm'
             await update.message.reply_text("Send the Telegram ID of the new admin:", reply_markup=ReplyKeyboardRemove())
             return
-        elif text == "👤 Create Login Pass":
+        elif text == "👤 New Login Pass":
             admin_states[user_id] = 'await_create_user_account'
             await update.message.reply_text("📝 أرسل الحساب الجديد للزبون بالصيغة التالية:\n`loginkey:password`", reply_markup=ReplyKeyboardRemove())
             return
-            
-        elif text == "📢 Broadcast":
+        elif text == "📢 Send Broadcast":
             admin_states[user_id] = 'await_broadcast_message'
             await update.message.reply_text("📝 **أرسل الآن الرسالة التي تريد تعميمها ونشرها في القناة ولجميع مستخدمي البوت:**", reply_markup=ReplyKeyboardRemove())
             return
-
-        elif text == "🪄 Fake Sale Promo":
+        elif text == "🪄 Trigger Fake Sale":
             admin_states[user_id] = 'await_fake_sale_confirmation'
-            await update.message.reply_text("⚠️ **تأكيد الإجراء:**\nالرجاء كتابة كلمة `تأكيد` لإنشاء ونشر إشعار الشراء الوهمي لـ Fluorite في القناة فوراً:", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text("⚠️ **تأكيد الإجراء:**\nالرجاء كتابة كلمة `تأكيد` لإنشاء ونشر إشعار الشراء الوهمي في القناة فوراً:", reply_markup=ReplyKeyboardRemove())
             return
-            
-        elif text == "📊 Statistics":
+        elif text == "📊 System Stats":
             msg = f"🎫 **Active Coupons:** {', '.join([f'`{k}: {v}$`' for k,v in active_coupons.items()])}\n👥 **Total Authorized Accounts:** `{len(APPROVED_ACCOUNTS)}` accounts\n📢 **Total Bot Observers:** `{len(all_bot_users)}` users\n\n📦 **Current Stock:**\n"
             for p, d in fluorite_stock.items():
                 msg += f"🔹 `{p}` -> " + " | ".join([f"Day {k}: ({len(v)})" for k,v in d.items()]) + "\n"
             await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_admin_keyboard())
             return
-        elif text == "💾 Save Backup":
+        elif text == "💾 Manual Backup":
             save_system_backup()
             await update.message.reply_document(document=open(BACKUP_FILE, 'rb'), filename=BACKUP_FILE, caption="📥 **Database backup file successfully created!**", reply_markup=get_admin_keyboard())
             return
-        elif text == "👤 View as User":
+        elif text == "👤 Enter User Mode":
             admin_view_mode[user_id] = 'user'
             authenticated_users.add(user_id)
             if user_id not in user_currencies: user_currencies[user_id] = "USD"
@@ -375,85 +395,61 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Processing Admin Input States
         state = admin_states.get(user_id)
-        
         if state == 'await_fake_sale_confirmation':
             admin_states[user_id] = None
             if text == "تأكيد":
-                # توليد كود عشوائي 16 رمزاً بنفس صيغة صورة العميل
                 raw_fake_16_code = generate_random_16_code()
                 masked_fake_code = mask_credential(raw_fake_16_code)
-                
-                # صياغة الرسالة بالمصطلحات والكلمات الإيجابية الإنجليزية تماماً
                 attractive_fake_msg = (
                     f"🔥 **NEW SUCCESSFUL PURCHASE!** 🔥\n\n"
-                    f"⚡ **SOMEONE JUST BOUGHT A FLUORITE CODE NOW!** ⚡\n"
+                    f"⚡ **SOMEONE JUST BOUGHT A CODE NOW!** ⚡\n"
                     f"📈 **STORE IS ON FIRE!** 📈\n\n"
                     f"🤝 *Thank you for your endless trust in us! We promise to always deliver the latest updates and the absolute best tools for you!* ✨💎\n\n"
                     f"📥 **The code obtained by the user:**\n"
                     f"👉 `{masked_fake_code}` 🚀"
                 )
-                
                 try:
                     await context.bot.send_message(chat_id=CHANNEL_ID, text=attractive_fake_msg, parse_mode="Markdown")
-                    await update.message.reply_text("✅ **[نجاح]** تم التحقق ونشر الإشعار المشتعل باللغة الإنجليزية في القناة بنجاح!", reply_markup=get_admin_keyboard())
+                    await update.message.reply_text("✅ **[نجاح]** تم نشر الإشعار المشتعل في القناة بنجاح!", reply_markup=get_admin_keyboard())
                 except Exception as e:
                     await update.message.reply_text(f"❌ تم التأكيد لكن فشل الإرسال للقناة (تأكد من صلاحيات البوت). الخطأ: {e}", reply_markup=get_admin_keyboard())
-            else:
-                await update.message.reply_text("❌ إلغاء الإجراء، الكلمة التي أدخلتها ليست `تأكيد`.", reply_markup=get_admin_keyboard())
+            else: await update.message.reply_text("❌ إلغاء الإجراء، الكلمة التي أدخلتها ليست `تأكيد`.", reply_markup=get_admin_keyboard())
             return
-
         elif state == 'await_broadcast_message':
             admin_states[user_id] = None
-            success_count = 0
-            fail_count = 0
+            success_count = fail_count = 0
             await update.message.reply_text(f"⏳ جاري النشر في القناة وبدء النشر الجماعي لـ {len(all_bot_users)} مستخدم...")
-            
             try:
                 await context.bot.send_message(chat_id=CHANNEL_ID, text=text)
                 channel_status = "✅ تم النشر في القناة بنجاح!"
-            except Exception as e:
-                channel_status = f"❌ فشل النشر في القناة. الخطأ: {e}"
-                
+            except Exception as e: channel_status = f"❌ فشل النشر في القناة. الخطأ: {e}"
             for u_id in list(all_bot_users):
                 try:
                     await context.bot.send_message(chat_id=u_id, text=text)
                     success_count += 1
-                except:
-                    fail_count += 1
-            
-            report_msg = (
-                f"📢 **تم انتهاء عملية الإذاعة الجماعية!**\n\n"
-                f"📺 **حالة القناة:**\n{channel_status}\n\n"
-                f"👥 **حالة المشتركين في الخاص:**\n"
-                f"✅ تم التسليم لـ: `{success_count}` مستخدم.\n"
-                f"❌ فشل الإرسال لـ: `{fail_count}` مستخدم."
-            )
+                except: fail_count += 1
+            report_msg = f"📢 **تم انتهاء عملية الإذاعة الجماعية!**\n\n📺 **حالة القناة:**\n{channel_status}\n\n👥 **حالة المشتركين في الخاص:**\n✅ تم التسليم لـ: `{success_count}` مستخدم.\n❌ فشل الإرسال لـ: `{fail_count}` مستخدم."
             await update.message.reply_text(report_msg, parse_mode="Markdown", reply_markup=get_admin_keyboard())
             return
-
         elif state == 'await_new_prod_name':
             PRODUCTS[text] = {}
             fluorite_stock[text] = {}
             save_system_backup()
             await update.message.reply_text(f"✅ Product **{text}** created successfully!", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
-
         elif state == 'await_create_user_account':
             if ":" in text:
                 u, p = text.split(":", 1)
                 APPROVED_ACCOUNTS[u.strip()] = p.strip()
                 save_system_backup()
                 await update.message.reply_text(f"✅ **تم إنشاء تصريح العميل بنجاح!**\n👤 الـ Login Key: `{u.strip()}`\n🔑 الـ Password: `{p.strip()}`", parse_mode="Markdown", reply_markup=get_admin_keyboard())
-            else:
-                await update.message.reply_text("❌ صيغة خاطئة، لم يتم الإنشاء. يجب استخدام `loginkey:password`", reply_markup=get_admin_keyboard())
+            else: await update.message.reply_text("❌ صيغة خاطئة، لم يتم الإنشاء. يجب استخدام `loginkey:password`", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
-
         elif state == 'awaiting_custom_day_name':
             context.user_data["custom_inject_day"] = text
             buttons = [[InlineKeyboardButton(prod, callback_data=f"inject_day_to_{prod}")] for prod in PRODUCTS.keys()]
             await update.message.reply_text(f"⏱️ Plan duration set to `{text}` Days.\nNow select which product category to assign this plan to:", reply_markup=InlineKeyboardMarkup(buttons))
             admin_states[user_id] = None; return
-
         elif state == 'awaiting_raw_price':
             p_name = context.user_data.get("adm_prod")
             p_days = context.user_data.get("adm_dur")
@@ -465,11 +461,9 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if p_days not in fluorite_stock[p_name]: fluorite_stock[p_name][p_days] = []
                     save_system_backup()
                     await update.message.reply_text(f"✅ Price updated! **{p_name} ({p_days}D)** is now `{new_val}$`", reply_markup=get_admin_keyboard())
-                else:
-                    await update.message.reply_text("❌ Error: Product not found.", reply_markup=get_admin_keyboard())
+                else: await update.message.reply_text("❌ Error: Product not found.", reply_markup=get_admin_keyboard())
             except: await update.message.reply_text("❌ Numerical digits only.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
-
         elif state == 'awaiting_custom_inject_price':
             p_name = context.user_data.get("adm_prod")
             p_days = context.user_data.get("custom_inject_day")
@@ -483,7 +477,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"✅ Custom daily plan injected perfectly!", reply_markup=get_admin_keyboard())
             except: await update.message.reply_text("❌ Invalid price digits.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
-
         elif state == 'await_coup':
             try:
                 val = float(text)
@@ -493,7 +486,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"✅ **Coupon created:** `{code}` (`{val}$`)", parse_mode="Markdown", reply_markup=get_admin_keyboard())
             except: await update.message.reply_text("Error, numbers only.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
-
         elif state == 'awaiting_raw_keys':
             p_name = context.user_data.get("adm_prod")
             p_days = context.user_data.get("adm_dur")
@@ -505,7 +497,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"✅ Loaded {len(input_keys)} keys successfully!", reply_markup=get_admin_keyboard())
             else: await update.message.reply_text("⚠️ Processing error.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
-
         elif state == 'await_del':
             f = False
             for pr, dy in fluorite_stock.items():
@@ -514,13 +505,12 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_system_backup()
             await update.message.reply_text("✅ Key removed." if f else "❌ Key not found.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
-
         elif state == 'await_adm':
             try: ADMIN_LIST.add(int(text)); save_system_backup(); await update.message.reply_text("👑 Admin added successfully.", reply_markup=get_admin_keyboard())
             except: await update.message.reply_text("Invalid ID.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
 
-    if user_id in ADMIN_LIST and text == "🔙 Admin Panel":
+    if user_id in ADMIN_LIST and text == "🔙 Return to Admin":
         admin_view_mode[user_id] = 'admin'
         await update.message.reply_text("👑 Welcome back to the Management Room.", reply_markup=get_admin_keyboard())
         return
@@ -528,30 +518,53 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- User Frontend Operations ---
     sym, rate = get_user_currency_info(user_id)
 
-    if text == "💱 Currency":
+    if text == "💱 Switch Currency":
         user_currencies[user_id] = "USD" if user_currencies.get(user_id, "USD") == "LOCAL" else "LOCAL"
         save_system_backup()
         new_sym, _ = get_user_currency_info(user_id)
         await update.message.reply_text(f"🔄 Currency display changed to **{new_sym}**", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
         return
         
-    elif text == "🛒 Shop":
+    elif text == "🛒 Wholesale Shop":
         buttons = [[InlineKeyboardButton(f"📦 {prod}", callback_data=f"shop_prod_{prod}")] for prod in PRODUCTS.keys()]
         await update.message.reply_text("🛒 **Welcome to our Shop!**\n\nSelect a product category to view plans:", reply_markup=InlineKeyboardMarkup(buttons))
         return
         
-    elif text == "💳 Add Funds":
+    elif text == "💳 Top-up Balance":
         user_states[user_id] = 'ent_coup'
         await update.message.reply_text("🎫 Please send your coupon code here:", reply_markup=ReplyKeyboardRemove())
         return
 
-    elif text == "💬 Support":
+    elif text == "💬 Live Support":
         await update.message.reply_text(f"👑 Need help or want a login profile? Text our agent here: {SUPPORT_USER} ✨")
         return
         
-    elif text.startswith("💰 Wallet"):
+    elif text.startswith("💰 My Wallet"):
         bal_str = format_price(user_balances.get(user_id, 0.0), sym, rate)
         await update.message.reply_text(f"👤 **Your Account Status:**\n\n💵 Funds: `{bal_str}`\n🌐 Currency: `{sym}`", parse_mode="Markdown")
+        return
+        
+    # --- Reset Features Handling ---
+    elif text == "🔄 Reset Drip Key":
+        user_states[user_id] = "awaiting_drip_code"
+        await update.message.reply_text("📝 **Please send your 10-digit DRIP code:**", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+        return
+
+    elif text == "📁 Drip File Check":
+        user_states[user_id] = "awaiting_drip_file"
+        await update.message.reply_text("📁 **Please upload the file you want to check:**", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+        return
+
+    if user_states.get(user_id) == "awaiting_drip_code":
+        user_states[user_id] = None
+        if not text.isdigit() or len(text) != 10:
+            await update.message.reply_text("❌ **Invalid code!** Must be exactly 10 digits.", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
+            return
+            
+        if not client.is_connected(): await client.connect()
+        await client.send_message(DRIP_RESET_BOT, text)
+        pending_requests[user_id] = {"type": "drip"}
+        await update.message.reply_text("⏳ **DRIP code sent!** Waiting for response...", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
         return
 
     if user_states.get(user_id) == 'ent_coup':
@@ -577,7 +590,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     raw_key = fluorite_stock[p_name][p_days].pop(0)
                     user_balances[user_id] -= price
                     save_system_backup()
-                    
                     masked_output = mask_credential(raw_key)
                     await update.message.reply_text(f"🎉 **Awesome! Purchase successful:**\n\n`{masked_output}`\n\nHave fun using it! ✨", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
                 else: await update.message.reply_text(f"⚠️ Oh no! We are out of stock. Please ask {SUPPORT_USER}", reply_markup=get_user_keyboard(user_id))
@@ -586,18 +598,11 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ **Order cancelled.**", reply_markup=get_user_keyboard(user_id))
         return
 
-    if update.message.document and user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
-        if update.message.document.file_name == BACKUP_FILE:
-            file_obj = await context.bot.get_file(update.message.document.file_id)
-            await file_obj.download_to_drive(custom_path=BACKUP_FILE)
-            load_system_backup()
-            await update.message.reply_text("⚡ **Database file recovered!**", reply_markup=get_admin_keyboard())
-            return
-
     if user_balances.get(user_id, 0.0) == 0 and user_id not in ADMIN_LIST:
         await update.message.reply_text(f"👋 **Shop Locked**\n\nPlease add some funds first to start shopping.\n👑 **Support for top-up / login:** {SUPPORT_USER}", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
     else: 
-        if text: await update.message.reply_text("ℹ️ Please use the menu buttons to control.", reply_markup=get_user_keyboard(user_id))
+        if text and text not in ["🟢 My Currency", "💵 USD ($)"]: 
+            await update.message.reply_text("ℹ️ Please use the menu buttons to control.", reply_markup=get_user_keyboard(user_id))
 
 # --- Custom Add Plan Callback Handler ---
 async def handling_inject_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -618,9 +623,50 @@ async def handling_inject_callbacks(update: Update, context: ContextTypes.DEFAUL
         await query.edit_message_text(f"💵 Perfect! Now send the **Price in USD ($)**:")
         return
 
+# --- Telethon Post Init & Event Handler ---
+@client.on(events.NewMessage())
+async def handle_telethon_response(event):
+    global application # Accessing the global application object safely
+    sender = await event.get_sender()
+    if not sender or not getattr(sender, 'username', None): return
+    username = sender.username.lower()
+    drip_bot = DRIP_RESET_BOT.replace("@", "").lower()
+    target_bot = TARGET_BOT.replace("@", "").lower()
+
+    if username not in [drip_bot, target_bot]: return
+
+    to_delete = []
+    for uid, data in pending_requests.items():
+        if username == drip_bot and data["type"] == "drip":
+            if event.message.file:
+                path = await event.message.download_media()
+                await application.bot.send_document(chat_id=uid, document=open(path, 'rb'), caption="✅ **File Check Complete**", parse_mode="Markdown")
+                os.remove(path)
+            else:
+                await application.bot.send_message(chat_id=uid, text=f"📥 **DRIP Response:**\n`{event.message.message}`", parse_mode="Markdown")
+            to_delete.append(uid)
+
+        elif username == target_bot and data["type"] == "fluorite":
+            await application.bot.send_message(chat_id=uid, text=f"📥 **Response:**\n`{event.message.message}`", parse_mode="Markdown")
+            to_delete.append(uid)
+            
+    for uid in to_delete:
+        del pending_requests[uid]
+
+async def post_init(app: Application):
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            print("⚠️ Telethon is not authorized! You must login manually via python-telethon first.")
+        else:
+            print("✅ Telethon Client connected successfully inside the bot!")
+    except Exception as e:
+        print(f"❌ Telethon Connection Failed: {e}")
+
 if __name__ == '__main__':
-    application = ApplicationBuilder().token(TOKEN).build()
+    application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('reset', reset_cmd))
     application.add_handler(CallbackQueryHandler(handling_inject_callbacks, pattern="^(adm_add_custom_day|inject_day_to_.*)$"))
     application.add_handler(CallbackQueryHandler(shop_menu_callback))
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_messages))
