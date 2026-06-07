@@ -15,7 +15,6 @@ db_config = {
     'port': 3306
 }
 
-
 # --- Configurations ---
 TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
 PRIMARY_ADMIN = 5145154527
@@ -119,7 +118,6 @@ def get_admin_keyboard():
     ], resize_keyboard=True)
 
 def get_user_keyboard():
-    # تم توحيد النصوص لتعمل مع دالة الاستقبال
     return ReplyKeyboardMarkup([
         [KeyboardButton("🩷 Buy Key 🩷")],
         [KeyboardButton("💙 Support 💙"), KeyboardButton("🚪 Log out 🚪")],
@@ -514,7 +512,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🔄 Reset Fluorite":
         user_states[user_id] = 'awaiting_reset_code'
         await update.message.reply_text(
-            "🔄 **قسم إعادة التعيين (Reset)** 💎\n\n"
+            "🔄 **قسم إعادة التعيين (Reset) المباشر** 💎\n\n"
             "الرجاء إرسال **الكود (المفتاح)** الذي تريد عمل رسيت له الآن:\n\n"
             "*(لإلغاء العملية، قم بالضغط على أي زر آخر في القائمة)*", 
             parse_mode="Markdown",
@@ -522,7 +520,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Processing Reset Code Input
+    # Processing Reset Code Input (Database Integrated)
     if user_states.get(user_id) == 'awaiting_reset_code':
         # التحقق إذا ضغط المستخدم على أي زر للإلغاء
         if text in ["🩷 Buy Key 🩷", "💙 Support 💙", "🚪 Log out 🚪", "➡️ Next", "🔙 Back", "👤 My Profile", "🎫 Redeem Coupon", "🔄 Reset Fluorite"]:
@@ -531,27 +529,29 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         user_states[user_id] = None
-        reset_key = text.strip()
-
-        attractive_msg = (
-            f"✨ **تم تجهيز طلب الرسيت الخاص بك!** ✨\n\n"
-            f"🔑 **الكود:** `{reset_key}`\n"
-            f"*(اضغط على الكود لنسخه)*\n\n"
-            f"🤖 **الخطوة الأخيرة:**\n"
-            f"نظراً لسياسات الأمان، يرجى الضغط على الزر بالأسفل للذهاب إلى **بوت الرسيت الرسمي**، ثم الصق الكود هناك لإتمام العملية بنجاح. 🚀\n\n"
-            f"💧 *نحن نعمل دائماً لتوفير أفضل وأسرع الأدوات لك!*"
-        )
-
-        keyboard = [
-            [InlineKeyboardButton("🤖 الذهاب لبوت الرسيت الرسمي", url="https://t.me/rskeyflubyhienios_bot")]
-        ]
+        input_key = text.strip()
         
-        await update.message.reply_text(
-            attractive_msg, 
-            parse_mode="Markdown", 
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        await update.message.reply_text("⚙️ **العودة للقائمة:**", reply_markup=get_user_keyboard_page2())
+        try:
+            # 1. الاتصال بقاعدة البيانات
+            conn = mysql.connector.connect(**db_config)
+            cursor = conn.cursor()
+            
+            # 2. تنفيذ أمر تصفير الجهاز 
+            query = "UPDATE keys SET hwid = NULL WHERE code = %s"
+            cursor.execute(query, (input_key,))
+            conn.commit()
+            
+            if cursor.rowcount > 0:
+                await update.message.reply_text(f"✅ **تم عمل Reset بنجاح!**\nالكود `{input_key}` أصبح جاهزاً للاستخدام على جهاز جديد.", parse_mode="Markdown")
+            else:
+                await update.message.reply_text("❌ **فشل:** الكود غير موجود أو غير صحيح.")
+            
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ خطأ في الاتصال بقاعدة البيانات: {e}")
+        
+        await update.message.reply_text("⚙️ **الخيارات:**", reply_markup=get_user_keyboard_page2())
         return
 
     # Processing Coupon Input
