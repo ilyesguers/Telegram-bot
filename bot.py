@@ -70,7 +70,7 @@ def get_user_currency_info(user_id):
 def format_price(usd_amount, symbol, rate):
     return f"{usd_amount * rate:.1f} $" if symbol == "$" else f"{usd_amount * rate:.1f} {symbol}"
 
-# --- Cute & Simple English Buttons ---
+# --- Keyboards ---
 def get_admin_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🎫 Mint Coupon"), KeyboardButton("📦 Add Keys")],
@@ -83,13 +83,14 @@ def get_user_keyboard(user_id):
     bal_str = format_price(user_balances.get(user_id, 0.0), *get_user_currency_info(user_id))
     keyboard = [
         [KeyboardButton("🛒 Shop"), KeyboardButton("💳 Add Funds")],
-        [KeyboardButton(f"💰 Wallet [{bal_str}]"), KeyboardButton("💱 Currency")]
+        [KeyboardButton(f"💰 Wallet [{bal_str}]"), KeyboardButton("💱 Currency")],
+        [KeyboardButton("💬 Support")]
     ]
     if user_id in ADMIN_LIST:
-        keyboard.append([KeyboardButton("🔙 Admin Panel")])
+        keyboard.insert(0, [KeyboardButton("🔙 Admin Panel")])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# --- Welcome Flows ---
+# --- Start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     admin_states[user_id] = user_states[user_id] = None
@@ -112,37 +113,24 @@ async def show_user_welcome(update: Update, user_id: int):
     msg = (
         f"👋 **Hello friend! Welcome to our store!** ✨\n\n"
         f"💳 **Your Balance:** `{bal_str}`\n\n"
-        f"Feel free to check our products below. If you want to add funds, contact our friendly support:\n"
-        f"👑 **Support:** {SUPPORT_USER} ✨"
+        f"Feel free to check our products below. If you want to add funds or get login keys, click support:\n"
+        f"👑 **Support Desk:** {SUPPORT_USER} ✨"
     )
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
 
-# --- Inline Shop Menus ---
+# --- Simple Inline Clicks Hub ---
 async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     data = query.data
 
-    if data == "shop_main":
-        keyboard = [[InlineKeyboardButton(prod, callback_data=f"prod_{prod}")] for prod in PRODUCTS.keys()]
-        await query.edit_message_text("🛒 **Please choose a product:**", reply_markup=InlineKeyboardMarkup(keyboard))
-    
-    elif data.startswith("prod_"):
-        selected_prod = data.replace("prod_", "")
+    # User Store Buying
+    if data.startswith("buy_"):
+        parts = data.split("_")
+        selected_prod = parts[1]
+        selected_days = parts[2]
         context.user_data["selected_product"] = selected_prod
-        
-        keyboard = [
-            [InlineKeyboardButton("📆 1 Day Plan", callback_data="days_1")],
-            [InlineKeyboardButton("📆 7 Days Plan", callback_data="days_7")],
-            [InlineKeyboardButton("📆 30 Days Plan", callback_data="days_30")],
-            [InlineKeyboardButton("🔙 Back", callback_data="shop_main")]
-        ]
-        await query.edit_message_text(f"💎 **You picked: {selected_prod}**\nChoose your access duration:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data.startswith("days_"):
-        selected_days = data.replace("days_", "")
-        selected_prod = context.user_data.get("selected_product")
         context.user_data["selected_days"] = selected_days
         
         price_usd = PRODUCTS[selected_prod][selected_days]
@@ -150,7 +138,6 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         price_str = format_price(price_usd, sym, rate)
         
         user_states[user_id] = "awaiting_checkout_confirm"
-        
         checkout_msg = (
             f"🛍️ **Your Order Summary**\n\n"
             f"📦 **Product:** `{selected_prod}`\n"
@@ -159,8 +146,39 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"🌸 To confirm your order, reply with the word: **`ok`**"
         )
         await query.edit_message_text(checkout_msg, parse_mode="Markdown")
+        return
 
-# --- Messages and Inputs Management ---
+    # Super Simple Step-by-Step Keys Adding (Admin)
+    if data.startswith("adm_add_"):
+        prod = data.replace("adm_add_", "")
+        context.user_data["adm_prod"] = prod
+        buttons = [[InlineKeyboardButton(f"📅 {d} Day(s)", callback_data=f"adm_dur_{d}")] for d in PRODUCTS[prod].keys()]
+        await query.edit_message_text(f"📦 Adding keys for **{prod}**\nSelect duration plan:", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data.startswith("adm_dur_"):
+        dur = data.replace("adm_dur_", "")
+        context.user_data["adm_dur"] = dur
+        admin_states[user_id] = "awaiting_raw_keys"
+        await query.edit_message_text(f"📝 **Almost done!**\nNow send the keys/codes (You can paste one or multiple lines):")
+        return
+
+    # Super Simple Step-by-Step Price Customization (Admin)
+    if data.startswith("adm_prc_"):
+        prod = data.replace("adm_prc_", "")
+        context.user_data["adm_prod"] = prod
+        buttons = [[InlineKeyboardButton(f"⚙️ Edit {d} Day Price", callback_data=f"adm_p_dur_{d}")] for d in PRODUCTS[prod].keys()]
+        await query.edit_message_text(f"⚙️ Modifying rates for **{prod}**\nSelect plan duration:", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data.startswith("adm_p_dur_"):
+        dur = data.replace("adm_p_dur_", "")
+        context.user_data["adm_dur"] = dur
+        admin_states[user_id] = "awaiting_raw_price"
+        await query.edit_message_text(f"💵 Please send the **New Price in USD ($)** for this plan (numbers only):")
+        return
+
+# --- Text Messaging Systems ---
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
@@ -171,20 +189,23 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_user_welcome(update, user_id)
         return
 
-    # --- Admin HQ Commands ---
+    # --- Admin Interactive Panel ---
     if user_id in ADMIN_LIST and admin_view_mode.get(user_id, 'admin') == 'admin':
         if text == "🎫 Mint Coupon":
             admin_states[user_id] = 'await_coup'
             await update.message.reply_text("💵 Enter coupon value in USD (numbers only):", reply_markup=ReplyKeyboardRemove())
             return
+
         elif text == "📦 Add Keys":
-            admin_states[user_id] = 'await_key'
-            await update.message.reply_text("Send format: `Product Name | Days | Code`", reply_markup=ReplyKeyboardRemove())
+            buttons = [[InlineKeyboardButton(prod, callback_data=f"adm_add_{prod}")] for prod in PRODUCTS.keys()]
+            await update.message.reply_text("📦 **Select target product to load stock:**", reply_markup=InlineKeyboardMarkup(buttons))
             return
+
         elif text == "⚙️ Edit Prices":
-            admin_states[user_id] = 'await_price'
-            await update.message.reply_text("Send format: `Product Name | Days | Price in USD`", reply_markup=ReplyKeyboardRemove())
+            buttons = [[InlineKeyboardButton(prod, callback_data=f"adm_prc_{prod}")] for prod in PRODUCTS.keys()]
+            await update.message.reply_text("⚙️ **Select product to adjust price:**", reply_markup=InlineKeyboardMarkup(buttons))
             return
+
         elif text == "🗑️ Delete Key":
             admin_states[user_id] = 'await_del'
             await update.message.reply_text("Paste the code you want to remove from stock:", reply_markup=ReplyKeyboardRemove())
@@ -209,6 +230,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔄 Switched to User View simulation.", reply_markup=get_user_keyboard(user_id))
             return
 
+        # Simple Processing States
         state = admin_states.get(user_id)
         if state == 'await_coup':
             try:
@@ -219,24 +241,30 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"✅ **Coupon created:** `{code}` (`{val}$`)", parse_mode="Markdown", reply_markup=get_admin_keyboard())
             except: await update.message.reply_text("Error, numbers only.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
-        elif state == 'await_key':
-            p = text.split('|')
-            if len(p) == 3 and p[0].strip() in fluorite_stock and p[1].strip() in ["1", "7", "30"]:
-                fluorite_stock[p[0].strip()][p[1].strip()].append(p[2].strip())
+
+        elif state == 'awaiting_raw_keys':
+            p_name = context.user_data.get("adm_prod")
+            p_days = context.user_data.get("adm_dur")
+            input_keys = [line.strip() for line in text.split('\n') if line.strip()]
+            
+            if p_name in fluorite_stock and p_days in fluorite_stock[p_name]:
+                fluorite_stock[p_name][p_days].extend(input_keys)
                 save_system_backup()
-                await update.message.reply_text("✅ Key successfully saved to stock.", reply_markup=get_admin_keyboard())
-            else: await update.message.reply_text("Format error.", reply_markup=get_admin_keyboard())
+                await update.message.reply_text(f"✅ Loaded {len(input_keys)} keys to **{p_name} ({p_days} Days)** successfully!", reply_markup=get_admin_keyboard())
+            else: await update.message.reply_text("⚠️ Processing error, please try again.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
-        elif state == 'await_price':
-            p = text.split('|')
-            if len(p) == 3 and p[0].strip() in PRODUCTS and p[1].strip() in ["1", "7", "30"]:
-                try: 
-                    PRODUCTS[p[0].strip()][p[1].strip()] = float(p[2].strip())
-                    save_system_backup()
-                    await update.message.reply_text("✅ Price updated successfully.", reply_markup=get_admin_keyboard())
-                except: await update.message.reply_text("Invalid value.")
-            else: await update.message.reply_text("Format error.")
+
+        elif state == 'awaiting_raw_price':
+            p_name = context.user_data.get("adm_prod")
+            p_days = context.user_data.get("adm_dur")
+            try:
+                new_val = float(text)
+                PRODUCTS[p_name][p_days] = new_val
+                save_system_backup()
+                await update.message.reply_text(f"✅ Price updated! **{p_name} ({p_days}D)** is now `{new_val}$`", reply_markup=get_admin_keyboard())
+            except: await update.message.reply_text("❌ Numerical digits only. Update failed.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
+
         elif state == 'await_del':
             f = False
             for pr, dy in fluorite_stock.items():
@@ -245,6 +273,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_system_backup()
             await update.message.reply_text("✅ Key removed." if f else "❌ Key not found.", reply_markup=get_admin_keyboard())
             admin_states[user_id] = None; return
+
         elif state == 'await_adm':
             try: ADMIN_LIST.add(int(text)); save_system_backup(); await update.message.reply_text("👑 Admin added successfully.", reply_markup=get_admin_keyboard())
             except: await update.message.reply_text("Invalid ID.", reply_markup=get_admin_keyboard())
@@ -255,7 +284,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("👑 Welcome back to the Management Room.", reply_markup=get_admin_keyboard())
         return
 
-    # --- User Functions ---
+    # --- User Frontend Operations ---
     sym, rate = get_user_currency_info(user_id)
 
     if text == "💱 Currency":
@@ -266,13 +295,31 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     elif text == "🛒 Shop":
-        keyboard = [[InlineKeyboardButton(prod, callback_data=f"prod_{prod}")] for prod in PRODUCTS.keys()]
-        await update.message.reply_text("🛒 **Please choose a product:**", reply_markup=InlineKeyboardMarkup(keyboard))
+        # All products listed cleanly on one page
+        shop_msg = "🛒 **CHEATS CATALOGUE** 🛒\n\n"
+        inline_buttons = []
+        
+        for prod_name, durations in PRODUCTS.items():
+            shop_msg += f"🔹 **{prod_name}**\n"
+            row_buttons = []
+            for days, price in durations.items():
+                price_str = format_price(price, sym, rate)
+                shop_msg += f" ▫️ {days} Day(s) → `{price_str}`\n"
+                btn_label = f"{prod_name.split()[0]} [{days}D]"
+                row_buttons.append(InlineKeyboardButton(btn_label, callback_data=f"buy_{prod_name}_{days}"))
+            shop_msg += "\n"
+            inline_buttons.append(row_buttons)
+            
+        await update.message.reply_text(shop_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_buttons))
         return
         
     elif text == "💳 Add Funds":
         user_states[user_id] = 'ent_coup'
         await update.message.reply_text("🎫 Please send your coupon code here:", reply_markup=ReplyKeyboardRemove())
+        return
+
+    elif text == "💬 Support":
+        await update.message.reply_text(f"👑 Need help or want a login profile? Text our agent here: {SUPPORT_USER} ✨")
         return
         
     elif text.startswith("💰 Wallet"):
@@ -280,7 +327,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"👤 **Your Account Status:**\n\n💵 Funds: `{bal_str}`\n🌐 Currency: `{sym}`\n👑 Support desk: {SUPPORT_USER}", parse_mode="Markdown")
         return
 
-    # Process Coupon Shifting
+    # Coupon shifting
     if user_states.get(user_id) == 'ent_coup':
         user_states[user_id] = None
         if text in active_coupons:
@@ -292,7 +339,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text("❌ Code is incorrect or already used.", reply_markup=get_user_keyboard(user_id))
         return
 
-    # --- Secure Sweet Confirmation Process (ok) ---
+    # User Checkout Confirmation
     if user_states.get(user_id) == "awaiting_checkout_confirm":
         user_states[user_id] = None
         if text.lower() == "ok":
@@ -322,7 +369,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     if user_balances.get(user_id, 0.0) == 0 and user_id not in ADMIN_LIST:
-        await update.message.reply_text(f"👋 **Shop Locked**\n\nPlease add some funds first to start shopping.\n👑 **Support for top-up:** {SUPPORT_USER}", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
+        await update.message.reply_text(f"👋 **Shop Locked**\n\nPlease add some funds first to start shopping.\n👑 **Support for top-up / login:** {SUPPORT_USER}", parse_mode="Markdown", reply_markup=get_user_keyboard(user_id))
     else: await update.message.reply_text("ℹ️ Please use the menu buttons to control.", reply_markup=get_user_keyboard(user_id))
 
 if __name__ == '__main__':
@@ -330,5 +377,5 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CallbackQueryHandler(shop_menu_callback))
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_messages))
-    print("🏪 Beautiful English Bot running successfully...")
+    print("🏪 Super Simple One-Page Store running successfully...")
     application.run_polling()
