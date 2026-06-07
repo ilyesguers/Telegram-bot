@@ -8,11 +8,12 @@ import os
 # --- Configurations ---
 TOKEN = '8765508457:AAHLzXj9JEMCbnIWfeov39bN75JrRZ9JcfQ'
 PRIMARY_ADMIN = 5145154527
+SECONDARY_ADMIN = 8300889547  # المسؤول الدائم المضاف
 SUPPORT_USER = "@i6issiiiii"
 BACKUP_FILE = "fluorite_backup.json"
 
 # --- Database ---
-ADMIN_LIST = {PRIMARY_ADMIN}
+ADMIN_LIST = {PRIMARY_ADMIN, SECONDARY_ADMIN}
 PRODUCTS = {
     "Fluorite Hack 💎": {"1": 5.0, "7": 15.0, "30": 40.0},
     "Drip Hack 💧": {"1": 4.0, "7": 12.0, "30": 35.0}
@@ -41,7 +42,8 @@ def load_system_backup():
         try:
             with open(BACKUP_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                ADMIN_LIST = set(data.get("admins", [PRIMARY_ADMIN]))
+                saved_admins = data.get("admins", [])
+                ADMIN_LIST = set(saved_admins) | {PRIMARY_ADMIN, SECONDARY_ADMIN}
                 user_balances = {int(k): v for k, v in data.get("balances", {}).items()}
                 user_currencies = {int(k): v for k, v in data.get("currencies", {}).items()}
                 user_countries = {int(k): v for k, v in data.get("countries", {}).items()}
@@ -148,7 +150,7 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(checkout_msg, parse_mode="Markdown")
         return
 
-    # Super Simple Step-by-Step Keys Adding (Admin)
+    # Step-by-Step Keys Adding (Admin)
     if data.startswith("adm_add_"):
         prod = data.replace("adm_add_", "")
         context.user_data["adm_prod"] = prod
@@ -163,7 +165,7 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(f"📝 **Almost done!**\nNow send the keys/codes (You can paste one or multiple lines):")
         return
 
-    # Super Simple Step-by-Step Price Customization (Admin)
+    # Step-by-Step Price Customization (Admin)
     if data.startswith("adm_prc_"):
         prod = data.replace("adm_prc_", "")
         context.user_data["adm_prod"] = prod
@@ -230,7 +232,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔄 Switched to User View simulation.", reply_markup=get_user_keyboard(user_id))
             return
 
-        # Simple Processing States
+        # Processing States
         state = admin_states.get(user_id)
         if state == 'await_coup':
             try:
@@ -295,22 +297,28 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     elif text == "🛒 Shop":
-        # All products listed cleanly on one page
-        shop_msg = "🛒 **CHEATS CATALOGUE** 🛒\n\n"
-        inline_buttons = []
-        
+        # عرض المنتجات بنظام قنوات التلغرام لبيع الهاكات بشكل منفصل وجميل جداً
         for prod_name, durations in PRODUCTS.items():
-            shop_msg += f"🔹 **{prod_name}**\n"
+            # بناء الرسالة التسويقية المستقلة لكل هاك
+            shop_msg = (
+                f"🔥 **{prod_name.upper()} CHANNEL** 🔥\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"🚀 Status: `⚠️ Working / Safe`\n"
+                f"ℹ️ Description: Best choice for safe and smooth gaming!\n\n"
+                f"💵 **PRICES & PLANS:**\n"
+            )
+            
             row_buttons = []
             for days, price in durations.items():
                 price_str = format_price(price, sym, rate)
-                shop_msg += f" ▫️ {days} Day(s) → `{price_str}`\n"
-                btn_label = f"{prod_name.split()[0]} [{days}D]"
+                shop_msg += f" ▫️ {days} Day(s) ➔ `{price_str}`\n"
+                
+                # أزرار الشراء المباشرة أسفل رسالة الهاك
+                btn_label = f"🛒 Buy {days}D"
                 row_buttons.append(InlineKeyboardButton(btn_label, callback_data=f"buy_{prod_name}_{days}"))
-            shop_msg += "\n"
-            inline_buttons.append(row_buttons)
-            
-        await update.message.reply_text(shop_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_buttons))
+                
+            shop_msg += "━━━━━━━━━━━━━━━━━━━━"
+            await update.message.reply_text(shop_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([row_buttons]))
         return
         
     elif text == "💳 Add Funds":
@@ -377,5 +385,5 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CallbackQueryHandler(shop_menu_callback))
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_messages))
-    print("🏪 Super Simple One-Page Store running successfully...")
+    print("🏪 Beautiful Channel-Style Store running successfully...")
     application.run_polling()
