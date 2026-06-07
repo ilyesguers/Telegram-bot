@@ -1,6 +1,7 @@
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telethon import TelegramClient, events
+from telegram.ext import Application
 import random
 import string
 import json
